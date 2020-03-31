@@ -2,29 +2,11 @@
 
 ![input 1](fig/dot.png)
 <br/>
-<img src="fig/dot.png" alt="s1" width="15%" height="15%" style="border:5px solid black"/>
-<img src="paper/fig/sysmix8/31800/source-5.png" alt="s1" width="15%" height="15%" style="border:5px solid black"/>
-<img src="paper/fig/sysmix8/31800/source-0.png" alt="s2" width="15%" height="15%" style="border:5px solid black"/>
-<img src="paper/fig/sysmix8/31800/source-6.png" alt="s3" width="15%" height="15%" style="border:5px solid black"/>
-<br/>
-<img src="paper/fig/sysmix8/31800/source-5.png" alt="s1" width="15%" height="15%" style="border:5px solid black"/>
-<img src="fig/mix_5_5_0--1.png" alt="a1" width="15%" height="15%"/>
-<img src="fig/mix_5_0_0-2.png" alt="a2" width="15%" height="15%"/>
-<img src="fig/mix_5_6_0-2.png" alt="a3" width="15%" height="15%"/>
-<br/>
-<img src="paper/fig/sysmix8/31800/source-0.png" alt="s2" width="15%" height="15%" style="border:5px solid black"/>
-<img src="fig/mix_0_5_0-2.png" alt="a4" width="15%" height="15%"/>
-<img src="fig/mix_0_0_0--1.png" alt="a5" width="15%" height="15%"/>
-<img src="fig/mix_0_6_0-2.png" alt="a6" width="15%" height="15%"/>
-<br/>
-<img src="paper/fig/sysmix8/31800/source-6.png" alt="s3" width="15%" height="15%" style="border:5px solid black"/>
-<img src="fig/mix_6_5_0-2.png" alt="a7" width="15%" height="15%"/>
-<img src="fig/mix_6_0_0-2.png" alt="a8" width="15%" height="15%"/>
-<img src="fig/mix_6_6_0--1.png" alt="a9" width="15%" height="15%"/>
+<img src="fig/mix-grid.jpg" alt="s1" width="80%" height="80%"/>
 <br/>
 
 Code for the paper:
-* Heljakka, A., Hou, Y., Solin, A., Kannala, J. (2020). **Deep Automodulators** [[arXiv]](https://arxiv.org/abs/1912.10321) [1]
+* Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321).
 
 Implementation by **Ari Heljakka** (drawing from [2-4], h5tool [5]).
 
@@ -37,15 +19,13 @@ Tested with:
 * PyTorch v1.2.0
 
 ## Quick start
-```
-# 1. Download the FFHQ pre-trained models.
 
-# 2. Try the Evaluation Jupyter Notebook at /src/pioneer/Automodulator%20Evaluator.ipynb
-```
+1. Download the FFHQ pre-trained models.
+2. Try the Evaluation Jupyter Notebook at `/src/pioneer/Automodulator%20Evaluator.ipynb`
 
 ## Pre-trained models
 
-[Pre-trained models](https://drive.google.com/drive/folders/TODO) are available for each dataset.
+[Pre-trained models](https://drive.google.com/drive/folders/1_Sgq9DV3XvNt0JYC3lTkSD9VICuRzP1-) are available for each dataset.
 You can run them on command line with the [usage](#usage) examples below, inserting the proper dataset name (e.g. `-d celebaHQ`), checkpoint path name (e.g. `--save_dir cahq1`) and checkpoint ID, or use `-1` for the latest (e.g. `--start_iteration=36200000`).
 
 
@@ -143,7 +123,7 @@ Support and email replies are not always guaranteed, but we will appreciate and 
 
 ## References
 
-[1] Heljakka, A., Hou, Y., Solin, A., Kannala, J.: Deep Automodulators. [[arXiv]](https://arxiv.org/abs/1912.10321)
+[1] Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321)
 
 [2] https://github.com/AaltoVision/balanced-pioneer
 
@@ -153,7 +133,7 @@ Support and email replies are not always guaranteed, but we will appreciate and 
 
 [5] https://github.com/tkarras/progressive_growing_of_gans
 
-[5] Karras, T. and Aila, T. and Laine, S. and Lehtinen, J.: Progressive growing of GANs for improved quality, stability, and variation. In: International Conference on Learning Representations (ICLR), 2018.
+[5] Karras, T., Aila, T., Laine, S., and Lehtinen, J. (2018). **Progressive growing of GANs for improved quality, stability, and variation**. In: *International Conference on Learning Representations (ICLR)*.
 
 ## License
 
