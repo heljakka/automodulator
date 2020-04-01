@@ -74,15 +74,15 @@ Use `--testonly` to designate the testing (evaluation) mode, as opposed to train
 
 Note that each checkpoint has 2 files: the N_state and the N_SNU. Both are needed.
 
-1. Reconstructions, random samples and interpolations (FFHQ, 256x256):
+1. Reconstructions, random samples and interpolations (FFHQ, 256x256 or 512x512):
 ```
 python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --train_path /data/FFHQ_train --test_path /data/FFHQ_test --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --start_iteration=-1 --testonly
 ```
 
-2. Reconstructions of your own input images (FFHQ, 256x256):
+2. Reconstructions of your own input images (FFHQ, 256x256 or 512x512 - use the 512x512 model file unless your input resolution is lower):
 (Please remember to put your images under an extra subdirectory (e.g. `/my_images/png/` for the below example. Face images must be cropped and aligned as in CelebA-HQ and FFHQ, respectively.)
 ```
-python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --start_iteration=-1 --testonly --aux_in_path /my_images
+python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --start_iteration=-1 --testonly --aux_inpath /my_images
 ```
 
 For style-mixing examples, please see the Evaluator Jupyter Notebook.
@@ -102,11 +102,12 @@ The resolutions of each phase are defined in powers of 2, as follows:
 3 = 32x32,
 4 = 64x64,
 5 = 128x128,
-6 = 256x256
+6 = 256x256,
+7 = 512x512
 
 Note that all loss function hyper-parameters in the code base are scaled by a factor of 0.1 in comparison to the paper.
 
-Example of regular training FFHQ, 256x256:
+Example of regular training FFHQ, up to 512x512:
 ```
 python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --train_path /data/FFHQ_train --test_path /data/FFHQ_test --sample_N=16 --reconstructions_N=8 --interpolate_N=0 --total_kimg=45000
 ```
