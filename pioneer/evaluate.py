@@ -10,6 +10,10 @@ from pioneer import config
 from pioneer import utils
 from pioneer import data
 
+import time
+
+from pioneer import LPIPS as lpips
+from pioneer.FID.fid_score import calculate_fid_given_images
 args = config.get_config()
 
 class Utils:
@@ -20,12 +24,12 @@ class Utils:
         utils.requires_grad(generator, False)
         utils.requires_grad(encoder, False)
 
-        reso = 4 * 2 ** session.phase
+        reso = session.getReso()
 
         warmup_rounds = 200
         print('Warm-up rounds: {}'.format(warmup_rounds))
 
-        if session.phase < 1:
+        if session.getResoPhase() < 1:
             dataset = data.Utils.sample_data(loader, 4, reso)
         else:
             dataset = data.Utils.sample_data2(loader, 4, reso, session)
@@ -33,7 +37,7 @@ class Utils:
         x = Variable(real_image).to(device=args.device)
 
         for i in range(warmup_rounds):
-            ex = encoder(x, session.phase, session.alpha, args.use_ALQ).detach()
+            ex = encoder(x, session.getResoPhase(), session.alpha, args.use_ALQ).detach()
             ex, label = utils.split_labels_out_of_latent(ex)
             generator(ex, label, session.phase, session.alpha).detach()
 
@@ -66,7 +70,7 @@ class Utils:
                 myz,
                 input_class,
                 session.phase,
-                session.alpha).detach().data.cpu()
+                session.alpha).detach() #.data.cpu()
 
             for ii, img in enumerate(new_imgs):
                 torchvision.utils.save_image(
@@ -91,7 +95,7 @@ class Utils:
             # Total number is samplesRepeatN * colN * rowN
             # e.g. for 51200 samples, outcome is 5*80*128. Please only give multiples of 128 here.
             samplesRepeatN = max(1, int(args.sample_N / 128)) if not collateImages else 1
-            reso = 4 * 2 ** session.phase
+            reso = session.getReso()
 
             if not collateImages:
                 special_dir = '{}/sample/{}'.format(save_root, str(global_i).zfill(6))
@@ -105,19 +109,47 @@ class Utils:
                 colN = 1 if not collateImages else min(10, int(np.ceil(args.sample_N / 4.0)))
                 rowN = 128 if not collateImages else min(5, int(np.ceil(args.sample_N / 4.0)))
                 images = []
-                for _ in range(rowN):              
-                    myz = Variable(torch.randn(args.n_label * colN, args.nz)).to(device=args.device)
-                    myz = utils.normalize(myz)
-                    myz, input_class = utils.split_labels_out_of_latent(myz)
+                myzs = []
+                for _ in range(rowN):
+                    myz = {}
+                    for i in range(2):
+                       myz0 = Variable(torch.randn(args.n_label * colN, args.nz+1)).to(device=args.device)
+                       myz[i] = utils.normalize(myz0)
+                       #myz[i], input_class = utils.split_labels_out_of_latent(myz0)
 
-                    new_imgs = generator(
-                        myz,
-                        input_class,
-                        session.phase,
-                        session.alpha).detach().data.cpu()
-                    
+                    if args.randomMixN <= 1:
+                        new_imgs = generator(
+                            myz[0],
+                            None, # input_class,
+                            session.phase,
+                            session.alpha).detach() #.data.cpu()
+                    else:
+                        max_i = session.phase
+                        style_layer_begin = 2 #np.random.randint(low=1, high=(max_i+1))
+                        print("Cut at layer {} for the next {} random samples.".format(style_layer_begin, (myz[0].shape)))
+                        
+                        new_imgs = utils.gen_seq([ (myz[0], 0, style_layer_begin),
+                                                   (myz[1], style_layer_begin, -1)
+                                                 ], generator, session).detach()
+                        
                     images.append(new_imgs)
-                
+                    myzs.append(myz[0]) # TODO: Support mixed latents with rejection sampling
+
+                if args.rejection_sampling > 0 and not collateImages:
+                    filtered_images = []
+                    batch_size = 8
+                    for b in range(int(len(images) / batch_size)):
+                        img_batch = images[b*batch_size:(b+1)*batch_size]
+                        reco_z = session.encoder(Variable(torch.cat(img_batch,0)), session.getResoPhase(), session.alpha, args.use_ALQ).detach()
+                        cost_z = utils.mismatchV(torch.cat(myzs[b*batch_size:(b+1)*batch_size],0), reco_z, 'cos')
+                        _, ii = torch.sort(cost_z)
+                        keeper = args.rejection_sampling / 100.0
+                        keepN = max(1, int(len(ii)*keeper))
+                        for iindex in ii[:keepN]:
+                            filtered_images.append(img_batch[iindex])
+#                        filtered_images.append(img_batch[ii[:keepN]] ) #retain the best ones only
+                    images = filtered_images
+
                 if collateImages:
                     sample_dir = '{}/sample'.format(save_root)
                     if not os.path.exists(sample_dir):
@@ -140,9 +172,11 @@ class Utils:
                     #    writer.add_image('samples_latest_{}'.format(session.phase), torch.cat(images, 0), session.phase)
                 else:
                     for ii, img in enumerate(images):
+                        ipath =  '{}/{}_{}.png'.format(special_dir, str(global_i + 1).zfill(6), ii+outer_count*128)
+                        print(ipath)
                         torchvision.utils.save_image(
                             img,
-                            '{}/{}_{}.png'.format(special_dir, str(global_i + 1).zfill(6), ii+outer_count*128),
+                            ipath,
                             nrow=args.n_label * colN,
                             normalize=True,
                             range=(-1, 1),
@@ -155,7 +189,7 @@ class Utils:
     @staticmethod
     def reconstruct(input_image, encoder, generator, session, style_i=-1, style_layer_begin=0, style_layer_end=-1):
         with torch.no_grad():
-            style_input = encoder(Variable(input_image), session.phase, session.alpha, args.use_ALQ).detach()
+            style_input = encoder(Variable(input_image), session.getResoPhase(), session.alpha, args.use_ALQ).detach()
 
             #replicateStyle = True
 
@@ -169,23 +203,13 @@ class Utils:
             #z_w = generator(z_w, None, session.phase, session.alpha, style_input = style_input, style_layer_begin=style_layer_begin, style_layer_end=style_layer_end)
             #gex = generator(z_w, None, session.phase, session.alpha, style_input = z,           style_layer_begin=style_layer_end, style_layer_end=-1)
 
-            # For 'style_input' vector of images, apply the style of style_input[style_i] = z
-            # for the layers from 0 to style_layer_begin,
-            # and from style_layer_end onwards.
-            # For style_layer_begin to style_layer_end, apply the style of the original image.
-            # e.g. for 0-1, the image styles are: [orig, z, z, z, ...]
-            # e.g. for 0-_1: [orig, orig, orig,...]
-            # e.g. for 0-2: [orig, orig, z, z, z,...]
-            # e.g. for 2-3: [z,z,orig,z,z,z,...]
-
-            #import ipdb; ipdb.set_trace()
-            gex = utils.gen_seq([ (z, 0, style_layer_begin), 
+            gex = utils.gen_seq([ (z, 0, style_layer_begin),
                             (style_input, style_layer_begin, style_layer_end),
                             (z, style_layer_end, -1),
             ], generator, session).detach()
 
-            if gex.size()[0] > 1:
-                print("Norm of diff: {} / {}".format((gex[0][0] - gex[1][0]).norm(), (gex[0][0] - gex[1][0]).max()   ))
+#            if gex.size()[0] > 1:
+#                print("Norm of diff: {} / {}".format((gex[0][0] - gex[1][0]).norm(), (gex[0][0] - gex[1][0]).max()   ))
 
         return gex.data[:]
 
@@ -201,110 +225,48 @@ class Utils:
             save_root = args.sample_dir if args.sample_dir != None else args.save_dir
 
             if reconstructions and nr_of_imgs > 0:
-            #for iii in range(4):
-                reso = 4 * 2 ** session.phase
+                reso = session.getReso()
 
                 # First, create the single grid
 
-                if Utils.reconstruction_set_x is None or Utils.reconstruction_set_x.size(2) != reso or (session.phase >= 1 and session.alpha < 1.0):
-                    if session.phase < 1:
+                if Utils.reconstruction_set_x is None or Utils.reconstruction_set_x.size(2) != reso or (session.getResoPhase() >= 1 and session.alpha < 1.0):
+                    if session.getResoPhase() < 1:
                         dataset = data.Utils.sample_data(loader, min(nr_of_imgs, 16), reso)
                     else:
                         dataset = data.Utils.sample_data2(loader, min(nr_of_imgs, 16), reso, session)
                     Utils.reconstruction_set_x, _ = next(dataset)
 
-                if True:                    
-                    set1 = Utils.reconstruction_set_x
-                    set2, _ = next(dataset)
-#                    set3, _ = next(dataset)
-#                    full_set = torch.cat((set1, set2,set3))
-                    full_set = torch.cat((set1, set2))
-                    nr_of_imgs = 2
-
                 unstyledVersionDone = False
                 # For 64x64: (0,1), (2,3) and (4,-1)
                 # For 128x128: (2,3) and (3,4) fail (collapse to static image). Find out why.
-                #for sc in [(0,2), (2,-1), (2,4), (2,5), (4,-1), (5,-1)]:
+                for sc in [(0,1), (0,2), (2,-1), (2,4), (4,5), (5,-1)]:
+                    for style_i in range(8):
 
-                # For SEED=31!
-                if False:
-                    id_to_row = {8:0, 1:3, 2:5, 4:4, 0:1, 11:2}
-                    id_to_col = {6:3, 5:4, 3:2, 9:1, 10:0}
-                else:
-#                    id_to_row = {2:0, 0:1, 5:2}
-#                    id_to_col = {3:0, 1:1, 4:2}
-                    id_to_row = {2:0, 0:1, 5:2}
-                    id_to_col = {3:0, 1:1, 4:2}
-###                row_to_range = [(0,3), (0,3), (0,3), (3,4), (3,4), (4,-1)]
-#                row_to_range = [(0,2), (0,2), (0,2), (2,5), (2,5), (5,-1)]
-#                row_to_range = [(0,2), (0,2), (0,2)] #, (2,5), (2,5), (5,-1)]
-                row_to_range = [(4,-1), (4,-1), (4,-1)]
+                        if not unstyledVersionDone:
+                            scs = [(0, -1), sc]
+                        else:
+                            scs = [sc]                        
 
-                for a in range(6): #(12):
-                    for b in range(6): #(12): #(a+1,9-a):
-                        if a == b:
-                            continue
-                        #for sc in [(0,2), (2,-1), (2,4), (2,5), (4,-1), (5,-1)]:
-                        #for sc in [(0,-1), (0,1), (1,2), (2,3), (3,4), (4,5), (5,-1)]:                            
-                        #for sc in [(0,3), (3,4), (4,-1)]:
-#                        for sc in [(0,2), (2,5), (5,-1), (0,-1), (args.max_phase+1,-1)]:
-                        for sc in [(0,-1), (4,-1), (args.max_phase+1,-1)]:
-                            Utils.reconstruction_set_x = torch.cat( (full_set[a].unsqueeze(0), full_set[b].unsqueeze(0)) )
-                            in_indices = [a,b]
-
-                            for style_i in range(2): #4):
-                                if not unstyledVersionDone:
-                                    scs = [(0, -1), sc]
-                                else:
-                                    scs = [sc]
-
-                                for (style_layer_begin, style_layer_end) in scs:
-                                    #import ipdb; ipdb.set_trace()
-                                    reco_image = Utils.reconstruct( Utils.reconstruction_set_x, encoder, generator, session,
-                                                                    style_i = style_i, style_layer_begin=style_layer_begin, style_layer_end=style_layer_end)
-
-                                    t = torch.FloatTensor(Utils.reconstruction_set_x.size(0) * 2, Utils.reconstruction_set_x.size(1),
-                                                        Utils.reconstruction_set_x.size(2), Utils.reconstruction_set_x.size(3))
-
-                                    NN = int(Utils.reconstruction_set_x.size(0) / 1)
-                                    t[0:NN,:,:,:] = Utils.reconstruction_set_x[:NN]
-                                    t[NN:NN*2,:,:,:] = reco_image[:NN, :, :,:]
-                                
-                                    from pioneer.model import AdaNorm                       
-                                    
-                                    #save_path = '{}{}/reconstructions_{}_{}_{}_{}_{}_{}-{}.png'.format(save_root, prefix, session.phase, global_i, session.alpha, 'X' if AdaNorm.disable else 'ADA', style_i,style_layer_begin,style_layer_end)
-                                    #grid = torchvision.utils.save_image(t[:nr_of_imgs*2] / 2 + 0.5, save_path, padding=0)
-                                    #print(save_path)
-
-                                    for ii,img in enumerate(t[:nr_of_imgs]):
-                                        if in_indices[ii] in id_to_col:
-                                        #torchvision.utils.save_image(img / 2 + 0.5, '{}{}/{}_orig_{}.png'.format(save_root, prefix, args.manual_seed, in_indices[ii]), padding=0)
-                                            torchvision.utils.save_image(img / 2 + 0.5, '{}{}/2/source-B-{}.png'.format(save_root, prefix, id_to_col[in_indices[ii]]), padding=0)
-                                        elif in_indices[ii] in id_to_row:
-                                        #torchvision.utils.save_image(img / 2 + 0.5, '{}{}/{}_orig_{}.png'.format(save_root, prefix, args.manual_seed, in_indices[ii]), padding=0)
-                                            torchvision.utils.save_image(img / 2 + 0.5, '{}{}/2/source-A-{}.png'.format(save_root, prefix, id_to_row[in_indices[ii]]), padding=0)
-                                    if True:
-                                        for ii,img in enumerate(t[nr_of_imgs:nr_of_imgs*2]):
-                                            #save_path_old = '{}{}/{}_mix_{}_{}_{}-{}.png'.format(save_root, prefix, args.manual_seed, in_indices[ii],in_indices[style_i],style_layer_begin,style_layer_end)
-                                            if in_indices[ii] in id_to_col and in_indices[style_i] in id_to_row:
-                                                img_row = id_to_row[in_indices[style_i]]
-                                                if row_to_range[img_row] == (style_layer_begin,style_layer_end):
-                                                    #import ipdb; ipdb.set_trace()
-                                                    img_col = id_to_col[in_indices[ii]]
-                                                    save_path = '{}{}/2/mix-{}-{}.png'.format(save_root, prefix, img_row,img_col)
-                                                    print("Mapped {} as source-A and {} as source-B with layers {}".format(in_indices[style_i],in_indices[ii], (img_row,img_col) ))
-                                                    torchvision.utils.save_image(img / 2 + 0.5, save_path, padding=0)
-                                                elif (style_layer_begin,style_layer_end)==(0,-1) or (style_layer_begin,style_layer_end)==(args.max_phase+1,-1):
-                                                    img_col = id_to_col[in_indices[ii]]
-                                                    dimS = 'B-{}'.format(img_col) if (style_layer_begin,style_layer_end)==(0,-1) else 'A-{}'.format(img_row)
-                                                    save_path = '{}{}/2/source-{}-reco.png'.format(save_root, prefix, dimS) #img_row,img_col)
-                                                    torchvision.utils.save_image(img / 2 + 0.5, save_path, padding=0)
+                        for (style_layer_begin, style_layer_end) in scs:
+                            reco_image = Utils.reconstruct( Utils.reconstruction_set_x, encoder, generator, session,
+                                                            style_i = style_i, style_layer_begin=style_layer_begin, style_layer_end=style_layer_end)
 
 
-                                unstyledVersionDone = True
+                            t = torch.FloatTensor(Utils.reconstruction_set_x.size(0) * 2, Utils.reconstruction_set_x.size(1),
+                                                Utils.reconstruction_set_x.size(2), Utils.reconstruction_set_x.size(3))
 
-                # Hacky but this is an easy way to rescale the images to nice big lego format:
-                if session.phase < 4:
+                            NN = int(Utils.reconstruction_set_x.size(0) / 2)
+                            t[0:NN,:,:,:] = Utils.reconstruction_set_x[:NN]
+                            t[NN:NN*2,:,:,:] = reco_image[:NN, :, :,:]
+                        
+                            from pioneer.model import AdaNorm                       
+
+                            save_path = '{}{}/reconstructions_{}_{}_{}_{}_{}_{}-{}.png'.format(save_root, prefix, session.phase, global_i, session.alpha, 'X' if AdaNorm.disable else 'ADA', style_i,style_layer_begin,style_layer_end)
+                            grid = torchvision.utils.save_image(t[:nr_of_imgs] / 2 + 0.5, save_path, padding=0)
+                        unstyledVersionDone = True
+
+                # Rescale the images to nice big lego format:
+                if session.getResoPhase() < 4:
                     h = np.ceil(nr_of_imgs / 8)
                     h_scale = min(1.0, h/8.0)
                     im = Image.open(save_path)
@@ -315,7 +277,7 @@ class Utils:
                 #    writer.add_image('reconstruction_latest_{}'.format(session.phase), t[:nr_of_imgs] / 2 + 0.5, session.phase)
 
                 # Second, create the Individual images:
-                if session.phase < 1:
+                if session.getResoPhase() < 1:
                     dataset = data.Utils.sample_data(loader, 1, reso)
                 else:
                     dataset = data.Utils.sample_data2(loader, 1, reso, session)
@@ -325,23 +287,125 @@ class Utils:
                 if not os.path.exists(special_dir):
                     os.makedirs(special_dir)                
 
-                print("Save images: Alpha={}, phase={}, images={}, at {}".format(session.alpha, session.phase, nr_of_imgs, special_dir))
+                print("Save images: Alpha={}, phase={}, images={}, at {}".format(session.alpha, session.getResoPhase(), nr_of_imgs, special_dir))
+
+                lpips_dist = 0
+
+                inf_time = []
+                n_time = 0
+
                 for o in range(nr_of_imgs):
                     if o%500==0:
                         print(o)
                 
                     real_image, _ = next(dataset)
+                    start = time.time()
                     reco_image = Utils.reconstruct(real_image, encoder, generator, session)
+
+                    end = time.time()
+
+                    inf_time +=  [(end-start)]
 
                     t = torch.FloatTensor(real_image.size(0) * 2, real_image.size(1),
                                         real_image.size(2), real_image.size(3))      
-        
+                           
                     save_path_A = '{}/{}_orig.png'.format(special_dir, o)
                     save_path_B = '{}/{}_pine.png'.format(special_dir, o)
-
                     torchvision.utils.save_image(real_image[0] / 2 + 0.5, save_path_A, padding=0)
                     torchvision.utils.save_image(reco_image[0] / 2 + 0.5, save_path_B, padding=0)
-               
+
+                print("Mean elaped: {} or {} for bs={} with std={}".format(np.mean(inf_time), np.mean(inf_time)/len(real_image), len(real_image), np.std(inf_time)  ))
+
+        encoder.train()
+        generator.train()
+
+    def face_as_cropped(img):
+        reso = img.size()[2]
+        c = reso // 8
+
+        return img[:, :, 3*c:7*c, 2*c:6*c] #e.g. for 256x256, this is: 96 <= y < 224, 64 <= x < 192
+
+    def eval_metrics(generator, encoder, loader, global_i, nr_of_imgs, prefix, reals, reconstructions, session,
+                           writer=None):  # of the form"/[dir]"
+        generator.eval()
+        encoder.eval()
+
+        with torch.no_grad():
+            utils.requires_grad(generator, False)
+            utils.requires_grad(encoder, False)
+
+            if reconstructions and nr_of_imgs > 0:
+                reso = session.getReso()
+
+                batch_size = 16
+                n_batches = (nr_of_imgs+batch_size-1) // batch_size
+                n_used_imgs = n_batches * batch_size
+
+
+                #fid_score = 0
+                lpips_score = 0
+                lpips_model = lpips.PerceptualLoss(model='net-lin', net='alex', use_gpu=False)
+                real_images = []
+                reco_images = []
+                rand_images = []
+
+                FIDm = 3 # FID multiplier
+
+                if session.getResoPhase() >= 3:
+                    for o in range(n_batches*FIDm):
+                        myz = Variable(torch.randn(args.n_label * batch_size, args.nz)).to(device=args.device)
+                        myz = utils.normalize(myz)
+                        myz, input_class = utils.split_labels_out_of_latent(myz)
+
+                        random_image = generator(
+                                myz,
+                                input_class,
+                                session.phase,
+                                session.alpha).detach().data.cpu()
+
+                        rand_images.append(random_image)
+
+                        if o >= n_batches: #Reconstructions only up to n_batches, FIDs will take n_batches * 3 samples
+                             continue
+
+                        dataset = data.Utils.sample_data2(loader, batch_size, reso, session)
+
+                        real_image, _ = next(dataset)
+                        reco_image = Utils.reconstruct(real_image, encoder, generator, session)
+
+                        t = torch.FloatTensor(real_image.size(0) * 2, real_image.size(1),
+                                              real_image.size(2), real_image.size(3))
+
+                        # compute metrics and write it to tensorboard (if the reso >= 32)
+
+
+                        #lpips_score = "?"
+
+                        crop_needed = (args.data == 'celeba' or args.data == 'celebaHQ' or args.data == 'ffhq')
+
+                        if session.getResoPhase() >= 4 or not crop_needed: # 32x32 is minimum for LPIPS
+                            if crop_needed:
+                                real_image = Utils.face_as_cropped(real_image)
+                                reco_image = Utils.face_as_cropped(reco_image)
+
+                        real_images.append(real_image)
+                        reco_images.append(reco_image.detach().data.cpu())
+
+                    real_images = torch.cat(real_images, 0)
+                    reco_images = torch.cat(reco_images, 0)
+                    rand_images = torch.cat(rand_images, 0)
+
+
+                    lpips_dist = lpips_model.forward(real_images, reco_images)
+                    lpips_score = torch.mean(lpips_dist)
+
+                    fid_score = calculate_fid_given_images(real_images, rand_images, batch_size=batch_size, cuda=False, dims=2048)
+
+                    writer.add_scalar('LPIPS', lpips_score, session.sample_i)
+                    writer.add_scalar('FID', fid_score, session.sample_i)
+
+                    print("{}: FID = {}, LPIPS = {}".format(session.sample_i, fid_score, lpips_score))
+
         encoder.train()
         generator.train()
 
@@ -363,10 +427,10 @@ class Utils:
             utils.requires_grad(encoder, False)
 
             nr_of_imgs = 4 if not args.hexmode else 6 # "Corners"
-            reso = 4 * 2 ** session.phase
+            reso = session.getReso()
             if True:
             #if Utils.interpolation_set_x is None or Utils.interpolation_set_x.size(2) != reso or (phase >= 1 and alpha < 1.0):
-                if session.phase < 1:
+                if session.getResoPhase() < 1:
                     dataset = data.Utils.sample_data(loader, nr_of_imgs, reso)
                 else:
                     dataset = data.Utils.sample_data2(loader, nr_of_imgs, reso, session)
@@ -380,7 +444,7 @@ class Utils:
 
             if args.hexmode:
                 x = x[:nr_of_imgs] #Corners
-                z0 = encoder(Variable(x), session.phase, session.alpha, args.use_ALQ).detach()
+                z0 = encoder(Variable(x), session.getResoPhase(), session.alpha, args.use_ALQ).detach()
 
                 X = np.array([-1.7321,0.0000 ,1.7321 ,-2.5981,-0.8660,0.8660 ,2.5981 ,-3.4641,-1.7321,0.0000 ,1.7321 ,3.4641 ,-2.5981,-0.8660,0.8660 ,2.5981 ,-1.7321,0.0000,1.7321])
                 Y = np.array([-3.0000,-3.0000,-3.0000,-1.5000,-1.5000,-1.5000,-1.5000,0.0000,0.0000,0.0000,0.0000,0.0000,1.5000,1.5000,1.5000,1.5000,3.0000,3.0000,3.0000])
@@ -403,7 +467,7 @@ class Utils:
                 z0_x[inter_indices,:] = (torch.from_numpy(weights.T.astype(np.float32)).to(device=args.device) @ z0)[inter_indices,:]
                 z0_x = utils.normalize(z0_x)
             else:
-                z0 = encoder(Variable(x), session.phase, session.alpha, args.use_ALQ).detach()
+                z0 = encoder(Variable(x), session.getResoPhase(), session.alpha, args.use_ALQ).detach()
 
             t = torch.FloatTensor(latent_reso_hor * (latent_reso_ver+1) + nr_of_imgs, x.size(1),
                                 x.size(2), x.size(3))
@@ -451,12 +515,13 @@ class Utils:
                 if True: #Spherical
                     t_y = float(y_i) / (latent_reso_ver-1)
                     #z0_y = Variable(torch.FloatTensor(latent_reso_ver, z0.size(0)))
-                    z0_y1 = Utils.slerp(z0[0].data, z0[2].data, t_y)
-                    z0_y2 = Utils.slerp(z0[1].data, z0[3].data, t_y)
+                    
+                    z0_y1 = Utils.slerp(z0[0].data.cpu().numpy(), z0[2].data.cpu().numpy(), t_y)
+                    z0_y2 = Utils.slerp(z0[1].data.cpu().numpy(), z0[3].data.cpu().numpy(), t_y)
                     z0_x = Variable(torch.FloatTensor(latent_reso_hor, z0[0].size(0)))
                     for x_i in range(latent_reso_hor):
                         t_x = float(x_i) / (latent_reso_hor-1)
-                        z0_x[x_i] = Utils.slerp(z0_y1, z0_y2, t_x)
+                        z0_x[x_i] = torch.from_numpy( Utils.slerp(z0_y1, z0_y2, t_x) )
 
                 z0_x, label = utils.split_labels_out_of_latent(z0_x)
                 gex = generator(z0_x, label, session.phase, session.alpha).detach()                
@@ -471,7 +536,7 @@ class Utils:
             save_path = '{}{}/interpolations_{}_{}_{}.png'.format(special_dir, prefix, session.phase, epoch, session.alpha)
             grid = torchvision.utils.save_image(t / 2 + 0.5, save_path, nrow=latent_reso_ver, padding=0) #, normalize=True) #range=(-1,1)) #, normalize=True) #, scale_each=True)?
             # Hacky but this is an easy way to rescale the images to nice big lego format:
-            if session.phase < 4:
+            if session.getResoPhase() < 4:
                 im = Image.open(save_path)
                 im2 = im.resize((1024, 1024))
                 im2.save(save_path)        
@@ -482,7 +547,7 @@ class Utils:
         generator.train()
         encoder.train()
 
-def tests_run(generator_for_testing, encoder, test_data_loader, session, writer, reconstruction = True, interpolation = True, collated_sampling = True, individual_sampling = True):
+def tests_run(generator_for_testing, encoder, test_data_loader, session, writer, reconstruction = True, interpolation = True, collated_sampling = True, individual_sampling = True, metric_eval = True):
     if args.sample_dir and not os.path.exists(args.sample_dir):
         os.makedirs(args.sample_dir)
 
@@ -491,7 +556,6 @@ def tests_run(generator_for_testing, encoder, test_data_loader, session, writer,
     if reconstruction:
         for _ in range(1):
             Utils.reconstruct_images(generator_for_testing, encoder, test_data_loader, session.sample_i, nr_of_imgs = args.reconstructions_N, prefix = '', reals = False, reconstructions=True, session=session, writer=writer)
-            #AdaNorm.disable = not AdaNorm.disable
     if interpolation:
         for ii in range(args.interpolate_N):
             Utils.interpolate_images(generator_for_testing, encoder, test_data_loader, session.sample_i+ii, prefix = '',session=session,writer=writer)
@@ -505,3 +569,6 @@ def tests_run(generator_for_testing, encoder, test_data_loader, session, writer,
             generator_for_testing,
             session.sample_i, session=session, collateImages = False)
         print("Full Test samples generated.")
+
+#    if metric_eval and not args.testonly:
+#        Utils.eval_metrics(generator_for_testing, encoder, test_data_loader, session.sample_i, nr_of_imgs = 1000, prefix = '', reals = False, reconstructions= True, session=session, writer=writer)
