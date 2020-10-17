@@ -11,7 +11,6 @@ class TrainingScheduler:
     def update(self, iteration):
         self.phaseChangedOnLastUpdate = False
         while (self.myphase < len(self.configs)-1 and self.configs[self.myphase+1][0]*1000 <= iteration):
-            #import ipdb; ipdb.set_trace()    
             self.myphase += 1
             self.session.phase = self.configs[self.myphase][1]
             for opt, lr in zip(self.opts, self.configs[self.myphase][2]):

@@ -117,10 +117,9 @@ class Utils:
     def sample_data(dataloader, batch_size, image_size=4):
         maybeRandomHorizontalFlip = transforms.RandomHorizontalFlip() if args.sample_mirroring else transforms.Lambda(nop)
         if (args.data == 'celebaHQ'):
-            while True: #This is an infinite iterator
+            while True:
                 batch = dataloader(batch_size, image_size, 0.0)
                 yield torch.from_numpy(batch), None #no label
-                #yield torch.from_numpy(img), None #no label
             return # will never be reached
 
         transform = transforms.Compose([

@@ -24,6 +24,9 @@ def parse_args():
     parser.add_argument('--phase_offset', type=int, default=0, help='Use the reloaded model but start fresh from next phase (when manually moving to the next )')
     parser.add_argument('--step_offset', type=int, default=0, help='Use the reloaded model but ignore the given number of steps (use -1 for all steps)')
     parser.add_argument('--blurSN', action='store_true')
+    parser.add_argument('--no_LN', action='store_true', help='Disable layer noise')
+    parser.add_argument('--small_darch', action='store_true', help='Revert to the half-number of channels in high-resolution decoder feature maps')
+
     parser.add_argument('--randomMixN', type=int, default=0, help='use 2 here to create a random mix if sample_N>0')
 
     parser.add_argument('--upsampling', default='nearest', help='nearest|bilinear')
@@ -125,6 +128,7 @@ def init():
 
     args.use_TB = not args.no_TB
     args.load_SNU = not args.no_load_SNU
+    args.use_layer_noise = not args.no_LN
 
     args.sample_mirroring = True
     if args.testonly:
@@ -139,8 +143,10 @@ def init():
         args.images_per_stage = 2400e3 #if args.data != 'celebaHQ' else 4800e3
 
     if args.max_phase == -1:
-        if args.data == 'celebaHQ' or args.data == 'ffhq':
+        if args.data == 'celebaHQ' or args.data == 'lsun': 
             args.max_phase = 6
+        elif args.data == 'ffhq':
+            args.max_phase = 7
         elif args.data != 'cifar10':
             args.max_phase = 5
         else:

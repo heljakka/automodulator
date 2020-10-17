@@ -6,9 +6,9 @@
 <br/>
 
 Code for the paper:
-* Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321).
+* Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321). NeurIPS 2020, to appear.
 
-Implementation by **Ari Heljakka** (drawing from [2-4], h5tool [5]).
+Implementation by **Ari Heljakka** (drawing from [2-4], h5tool from [5]).
 
 ## Pre-requisites
 
@@ -25,7 +25,7 @@ Tested with:
 
 ## Pre-trained models
 
-[Pre-trained models](https://drive.google.com/drive/folders/1_Sgq9DV3XvNt0JYC3lTkSD9VICuRzP1-) are available for each dataset.
+[Pre-trained models](https://drive.google.com/drive/folders/1SJuIINgq8j2Rr-DTi_WKg-FRvoVLrt5_) are available for each dataset.
 You can run them on command line with the [usage](#usage) examples below, inserting the proper dataset name (e.g. `-d celebaHQ`), checkpoint path name (e.g. `--save_dir cahq1`) and checkpoint ID, or use `-1` for the latest (e.g. `--start_iteration=36200000`).
 
 
@@ -86,6 +86,9 @@ python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --sample_N=16 --recons
 ```
 
 For style-mixing examples, please see the Evaluator Jupyter Notebook.
+For not applying the layer noise, add `--no_LN`. (Also possible for models originally trained with layer noise.)
+For training or evaluating the CelebaHQ model, add `--small_darch` to indicate the smaller decoder architecture.
+
 
 ## Training
 
@@ -116,6 +119,34 @@ To enforce the flop-invariance on a specific layer (e.g. 2), add `--flip_invaria
 
 If the intermediate results are complete noise after ~10 Million training images for one of the supported datasets, then it is recommended to restart with changing the random seed with `--manual_seed=N` parameter. If you are working with a dataset of your own, then it is best to check whether the samples in lower-resolution stages looked correct (before breaking), and then either make the training stages in the last "stable" resolution longer, or make the KL margin tighter. You can adjust these in the make_ts() function.
 
+## Main Results
+
+| Dataset, resolution    |     FID-50k     |       PPL      |
+| ---------------------- | --------------- | -------------- |
+| FFHQ, 256x256          |     31.64       |      250.2     |
+| CelebaHQ, 256x256      |     29.13       |      203.8     |
+| LSUN Bedrooms, 256x256 |     25.53       |       -        |
+| LSUN Cars, 256x256     |     19.82       |       -        |
+
+You can reproduce the samples for the table as follows.
+
+FFHQ, 256x256:
+```
+python -m pioneer.train -d ffhq --save_dir ffhq256 --sample_N=50100  --start_iteration=-1 --testonly
+```
+CelebaHQ, 256x256:
+```
+python -m pioneer.train -d celebaHQ --save_dir celebaHQ256 --small_darch --sample_N=50100  --start_iteration=-1 --testonly
+```
+LSUN Bedrooms, 256x256:
+```
+python -m pioneer.train -d lsun --save_dir lsunBedrooms256 --sample_N=50100  --start_iteration=-1 --testonly
+```
+LSUN Cars, 256x256:
+```
+python -m pioneer.train -d lsun --save_dir lsunCars256 --sample_N=50100  --start_iteration=-1 --testonly
+```
+
 ## Support
 
 For all correspondence, please contact ari.heljakka@aalto.fi.
@@ -132,9 +163,7 @@ Support and email replies are not always guaranteed, but we will appreciate and 
 
 [4] https://github.com/DmitryUlyanov/AGE
 
-[5] https://github.com/tkarras/progressive_growing_of_gans
-
-[5] Karras, T., Aila, T., Laine, S., and Lehtinen, J. (2018). **Progressive growing of GANs for improved quality, stability, and variation**. In: *International Conference on Learning Representations (ICLR)*.
+[5] Karras, T., Aila, T., Laine, S., and Lehtinen, J. (2018). **Progressive growing of GANs for improved quality, stability, and variation**. In: *International Conference on Learning Representations (ICLR)*. https://github.com/tkarras/progressive_growing_of_gans
 
 ## License
 

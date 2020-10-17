@@ -40,9 +40,9 @@ def batch_size(reso):
         else:
             batch_table = {4:64, 8:32, 16:32, 32:32, 64:16, 128:14, 256:2, 512:2, 1024:1}
     elif args.gpu_count == 2:
-        batch_table = {4:256, 8:256, 16:256, 32:128, 64:64, 128:28, 256:32, 512:8, 1024:2}
+        batch_table = {4:256, 8:256, 16:256, 32:128, 64:64, 128:28, 256:32, 512:14, 1024:2}
     elif args.gpu_count == 4:
-        batch_table = {4:512, 8:256, 16:128, 32:64, 64:32, 128:64, 256:64, 512:16, 1024:4} #256:32
+        batch_table = {4:512, 8:256, 16:128, 32:64, 64:32, 128:64, 256:64, 512:32, 1024:4}
     elif args.gpu_count == 8:
         batch_table = {4:512, 8:512, 16:512, 32:256, 64:256, 128:128, 256:64, 512:32, 1024:8}
     else:
@@ -142,9 +142,20 @@ class Session:
                             checkpoint[gen]['module.adanorm_blocks.{}.mod.{}'.format(2+i*2, attr)] = checkpoint[gen]['module.progression.{}.conv.3.mod.{}'.format(i+1,attr)]
 
 
+        loadGeneratorWithNoise = True
+        if loadGeneratorWithNoise:
+            self.generator.module.create()
+            self.g_running.module.create()
+            print("Generator dynamic components loaded via create().")
+
         self.generator.load_state_dict(checkpoint['G_state_dict'])
         self.g_running.load_state_dict(checkpoint['G_running_state_dict'])
         self.encoder.load_state_dict(checkpoint['D_state_dict'])
+
+        if not loadGeneratorWithNoise:
+            self.generator.module.create()
+            self.g_running.module.create()
+        print("Generator dynamic components loaded via create().")
 
         if args.reset_optimizers <= 0:
             self.optimizerD.load_state_dict(checkpoint['optimizerD'])
@@ -181,6 +192,7 @@ class Session:
                 self.adaptive_loss[i].load_state_dict(checkpoint[akey][0])
             else:
                 akeys_ok = False
+
         if akeys_ok:
             print("Adaptive Losses loaded.")
         else:
@@ -372,8 +384,8 @@ def encoder_train(session, real_image, generatedImagePool, batch_N, match_x, sta
             loss_flip = torch.mean(session.adaptive_loss[session.getResoPhase()].lossfun((x_in - x_reco_in).view(-1, x_in.size()[1]*x_in.size()[2]*x_in.size()[3]) ))  * match_x * 0.2 + \
                         torch.mean(session.adaptive_loss[session.getResoPhase()].lossfun((x_mirror - x_reco_in_mirror).view(-1, x_mirror.size()[1]*x_mirror.size()[2]*x_mirror.size()[3]) ))  * match_x * 0.2
         else:
-            loss_flip = (   utils.mismatch(x_in, x_reco_in, args.match_x_metric) +
-                            utils.mismatch(x_mirror, x_reco_in_mirror, args.match_x_metric))*args.match_x
+            loss_flip = (utils.mismatch(x_in, x_reco_in, args.match_x_metric) +
+                         utils.mismatch(x_mirror, x_reco_in_mirror, args.match_x_metric))*args.match_x
 
         loss_flip.backward(retain_graph=True)
         stats['loss_flip'] = loss_flip.data.item()
@@ -437,9 +449,8 @@ def encoder_train(session, real_image, generatedImagePool, batch_N, match_x, sta
         # KL_fake: \Delta( e(g(Z)) , Z ) -> max_e
         KL_fake = KL_maximizer(egz) * args.fake_D_KL_scale
 
-        m = margin
-        if m > 0.0:
-             KL_loss = torch.min(torch.ones_like(KL_fake) * m/2, torch.max(-torch.ones_like(KL_fake) * m, KL_real + KL_fake)) # KL_fake is always negative with abs value typically larger than KL_real. Hence, the sum is negative, and must be gapped so that the minimum is the negative of the margin.
+        if margin > 0.0:
+             KL_loss = torch.min(torch.ones_like(KL_fake) * margin/2, torch.max(-torch.ones_like(KL_fake) * margin, KL_real + KL_fake)) # KL_fake is always negative with abs value typically larger than KL_real. Hence, the sum is negative, and must be gapped so that the minimum is the negative of the margin.
         else:
              KL_loss = KL_real + KL_fake
         e_losses.append(KL_loss)
@@ -726,6 +737,7 @@ def makeTS(opts, session):
         if args.flip_invariance_layer <=0:
             ts.add(20040, _phase=5, _lr=[0.001, 0.001], _margin=0.05, _aux_operations=None)
             ts.add(30680, _phase=6, _lr=[0.001, 0.001], _margin=0.05, _aux_operations=None)
+            ts.add(35700, _phase=7, _lr=[0.001, 0.001], _margin=0.05, _aux_operations=None)
         else:
             ts.add(12000, _phase=5, _lr=[0.001, 0.001], _margin=0.05, _aux_operations=None) #Phase 5 <=> reso 64x64 extension
             ts.add(20040, _phase=6, _lr=[0.001, 0.001], _margin=0.05, _aux_operations=None) #Phase 6 <=> reso 128x128

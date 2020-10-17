@@ -225,9 +225,9 @@ class BlurLayer(nn.Module):
 class NoiseLayer(nn.Module):
     def __init__(self, mysize):
         super().__init__()
-        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True, device=args.device)) #None
+        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True, device=args.device))
 
-    def forward(self, input):       
+    def forward(self, input):
         return input + torch.normal(torch.zeros_like(input), torch.ones_like(input)) * self.noise_scale.view((1,-1,1,1))
 
 class NopLayer(nn.Module):
@@ -247,8 +247,9 @@ class ConvBlock(nn.Module):
 
         if last_act is None:
             last_act = nn.LeakyReLU(1.0)  #NopLayer()
+
         #BLUR HACK
-        blur = True
+        blur = (args.upsampling != 'bilinear')
 
         pad1 = padding
         pad2 = padding
@@ -348,57 +349,58 @@ class Generator(nn.Module):
         self.adanorm_blocks = nn.ModuleList()
         self.z_const = torch.ones(512, 4, 4).to(device=args.device)
         print("AdaNorm.z_const initialized")
+        HLM = 1 if args.small_darch else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
         progression_raw = [ConvBlock(nz, nz, 4, 3, 3, 1, spectral_norm=gen_spectral_norm, const_layer=True, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
-                                          ConvBlock(nz, int(nz/2), 3, 1, spectral_norm=gen_spectral_norm, holder=self),
-                                          ConvBlock(int(nz/2), int(nz/4), 3, 1, spectral_norm=gen_spectral_norm, holder=self),
-                                          ConvBlock(int(nz/4), int(nz/8), 3, 1, spectral_norm=gen_spectral_norm, holder=self),
-                                          ConvBlock(int(nz/8), int(nz/16), 3, 1, spectral_norm=gen_spectral_norm, holder=self),
-                                          ConvBlock(int(nz/16), int(nz/32), 3, 1, spectral_norm=gen_spectral_norm, holder=self)]
+                                          ConvBlock(nz, int(nz/2)*HLM, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
+                                          ConvBlock(int(nz/2)*HLM, int(nz/4)*HLM, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
+                                          ConvBlock(int(nz/4)*HLM, int(nz/8)*HLM, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
+                                          ConvBlock(int(nz/8)*HLM, int(nz/16)*HLM, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
+                                          ConvBlock(int(nz/16)*HLM, int(nz/32)*HLM, 3, 1, spectral_norm=gen_spectral_norm, holder=self)]
 
-        to_rgb_raw = [nn.Conv2d(nz, 3, 1), #Each has 3 out channels and kernel size 1x1
+        to_rgb_raw = [nn.Conv2d(nz, 3, 1), #Each has 3 out channels and kernel size 1x1!
                                      nn.Conv2d(nz, 3, 1),
                                      nn.Conv2d(nz, 3, 1),
                                      nn.Conv2d(nz, 3, 1),
-                                     nn.Conv2d(int(nz/2), 3, 1),
-                                     nn.Conv2d(int(nz/4), 3, 1),
-                                     nn.Conv2d(int(nz/8), 3, 1),
-                                     nn.Conv2d(int(nz/16), 3, 1),
-                                     nn.Conv2d(int(nz/32), 3, 1)]
+                                     nn.Conv2d(int(nz/2)*HLM, 3, 1),
+                                     nn.Conv2d(int(nz/4)*HLM, 3, 1),
+                                     nn.Conv2d(int(nz/8)*HLM, 3, 1),
+                                     nn.Conv2d(int(nz/16)*HLM, 3, 1),
+                                     nn.Conv2d(int(nz/32)*HLM, 3, 1)]
 
         noise_raw = [nn.ModuleList([NoiseLayer(nz), NoiseLayer(nz)]),
                                    nn.ModuleList([NoiseLayer(nz), NoiseLayer(nz)]),
                                    nn.ModuleList([NoiseLayer(nz), NoiseLayer(nz)]),
                                    nn.ModuleList([NoiseLayer(nz), NoiseLayer(nz)]),
-                                   nn.ModuleList([NoiseLayer(int(nz/2)), NoiseLayer(int(nz/2))]),
-                                   nn.ModuleList([NoiseLayer(int(nz/4)), NoiseLayer(int(nz/4))]),
-                                   nn.ModuleList([NoiseLayer(int(nz/8)), NoiseLayer(int(nz/8))]),
-                                   nn.ModuleList([NoiseLayer(int(nz/16)), NoiseLayer(int(nz/16))]),
-                                   nn.ModuleList([NoiseLayer(int(nz/32)), NoiseLayer(int(nz/32))])]
+                                   nn.ModuleList([NoiseLayer(int(nz/2)*HLM), NoiseLayer(int(nz/2)*HLM)]),
+                                   nn.ModuleList([NoiseLayer(int(nz/4)*HLM), NoiseLayer(int(nz/4)*HLM)]),
+                                   nn.ModuleList([NoiseLayer(int(nz/8)*HLM), NoiseLayer(int(nz/8)*HLM)]),
+                                   nn.ModuleList([NoiseLayer(int(nz/16)*HLM), NoiseLayer(int(nz/16)*HLM)]),
+                                   nn.ModuleList([NoiseLayer(int(nz/32)*HLM), NoiseLayer(int(nz/32)*HLM)])]
 
-        # We disable noise if there are support layers. This is only to replicate the approach in Deep Automodulators paper.
+        # The args.flip_invariance_layer (when >=0) relates to driving scale-specific invariances in the weakly supervised case.
+        # We disable noise by default if there are support layers. This is only to replicate the approach in Deep Automodulators paper.
         # Feel free to enable it otherwise.
-        self.use_layer_noise = args.flip_invariance_layer <= -1
+        self.has_noise_layers = args.flip_invariance_layer <= -1
 
         if args.flip_invariance_layer <= -1:
             self.progression = nn.ModuleList(progression_raw)
             self.to_rgb = nn.ModuleList(to_rgb_raw)
-            if self.use_layer_noise:
+            if self.has_noise_layers:
                 self.noise = nn.ModuleList(noise_raw)
             Generator.supportBlockPoints = []
         else:
             self.supportTorgbBlock8 = nn.Conv2d(nz, 3, 1)
             self.supportProgression = ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self)
-            if self.use_layer_noise:
+            if self.has_noise_layers:
                 self.supportNoise = nn.ModuleList([NoiseLayer(nz), NoiseLayer(nz)])
-
             # Add support blocks like this and also to the Generator.supportBlockPoints
             #TODO: Support adding multiple layers in the following ModuleList concatenators:
             self.progression = nn.ModuleList(progression_raw[:args.flip_invariance_layer] + [self.supportProgression] + progression_raw[args.flip_invariance_layer:])
             self.to_rgb = nn.ModuleList(to_rgb_raw[:args.flip_invariance_layer] + [self.supportTorgbBlock8] + to_rgb_raw[args.flip_invariance_layer:])
-            if self.use_layer_noise:
+            if self.has_noise_layers:
                 self.noise = nn.ModuleList(noise_raw[:args.flip_invariance_layer] + [self.supportNoise] + noise_raw[args.flip_invariance_layer:])
             Generator.supportBlockPoints = [args.flip_invariance_layer] # You can add several layers here as a list, but you need to add the argparser support for that.
 
@@ -411,7 +413,10 @@ class Generator(nn.Module):
         init_linear(self.z_preprocess[0][0], lr_gain=mapping_lrmul)
         init_linear(self.z_preprocess[1][0], lr_gain=mapping_lrmul)
 
-    # Use alt_mix_z for style mixing so that for z of [B x N] and alt_mix_z of [M x N] and N <= B, the first M entreies of z are (partially) mixed with alt_mix_z
+    def create(self):
+        print("::create() n/i")
+
+   # Use alt_mix_z for style mixing so that for z of [B x N] and alt_mix_z of [M x N] and N <= B, the first M entreies of z are (partially) mixed with alt_mix_z
     # Since we assume the input in this case is already fully randomized, we don't need to randomize *which* z entires are mixed. But we do need to randomize the layer ID at which
     # the mixing starts.
 
@@ -428,12 +433,14 @@ class Generator(nn.Module):
 
         assert(not input is None)
 
+        self.use_layer_noise = not args.no_LN and args.flip_invariance_layer <= -1
+
         # Label is reserved for future use. Make None if not in use. #label = self.label_embed(label)
         if not label is None:
             input = torch.cat([input, label], 1)
 
         batchN = input.size()[0]
-
+        
         if args.stylefc > 0:
             input = self.z_preprocess[0](input)
 
@@ -445,7 +452,7 @@ class Generator(nn.Module):
              # Generator layers start from 0 and running-Generatro from 17, or vice versa. For both, do the same styling.
             network_offset = int(len(holder.adanorm_blocks) / 2) #17
             return [d*2, d*2+1] #, d*2+network_offset, d*2+network_offset+1]
-
+        
         # The first conv call will start from a constant content_input defined as a class-level var in AdaNorm
         if content_input is None:
             out = torch.ones(512, 4, 4).to(device=args.device).repeat(batchN, 1, 1, 1)
@@ -455,11 +462,11 @@ class Generator(nn.Module):
         block_offset = 0
 
         for i in range(style_layer_begin, style_layer_end):
-#            for s in layers_for_block_depth(i, self):
-#                self.adanorm_blocks[s].update(input)
-
             if i > 0 and not i in Generator.supportBlockPoints:
-                upsample = F.upsample(out, scale_factor=2)
+                if args.upsampling != 'bilinear':
+                    upsample = F.upsample(out, scale_factor=2)
+                else:
+                    upsample = F.interpolate(out, align_corners=False, scale_factor=2, mode='bilinear')
             else:
                 upsample = out
 
@@ -472,7 +479,8 @@ class Generator(nn.Module):
                 out = self.progression[i].conv[0][1](out)
                 out = self.noise[i][0](out)
                 out = self.progression[i].conv[0][2](out) #act
-                out = self.progression[i].conv[0][3](out)
+                if args.upsampling != 'bilinear':
+                    out = self.progression[i].conv[0][3](out) #Blur
                 out = self.progression[i].conv[1](out)
                 out = self.noise[i][1](out)
                 out = self.progression[i].conv[2](out) #act
@@ -480,6 +488,7 @@ class Generator(nn.Module):
 
         if style_layer_end == step+1: # The final layer is ALWAYS either to_rgb layer, or a mixture of 2 to-rgb_layers!
             out = out_act(self.to_rgb[step](out))
+            
             if style_layer_end > 1 and 0 <= alpha < 1:
                 skip_rgb = out_act(self.to_rgb[step - 1](upsample))
                 if args.gnn:
@@ -494,9 +503,6 @@ class Generator(nn.Module):
                 out = (1 - alpha) * skip_rgb + alpha * out
 
         return out
-
-
-
 
 pixelNormInDiscriminator = False
 use_mean_std_layer = False
