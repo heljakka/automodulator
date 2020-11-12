@@ -218,6 +218,8 @@ class Utils:
         generator.eval()
         encoder.eval()
 
+        imgs_per_style_mixture_run = min(nr_of_imgs, 8)
+
         with torch.no_grad():
             utils.requires_grad(generator, False)
             utils.requires_grad(encoder, False)
@@ -240,7 +242,7 @@ class Utils:
                 # For 64x64: (0,1), (2,3) and (4,-1)
                 # For 128x128: (2,3) and (3,4) fail (collapse to static image). Find out why.
                 for sc in [(0,1), (0,2), (2,-1), (2,4), (4,5), (5,-1)]:
-                    for style_i in range(8):
+                    for style_i in range(imgs_per_style_mixture_run):
 
                         if not unstyledVersionDone:
                             scs = [(0, -1), sc]
