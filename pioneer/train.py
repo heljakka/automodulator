@@ -50,20 +50,6 @@ def batch_size(reso):
     
     return batch_table[reso]
 
-def loadSNU(path):
-    if os.path.exists(path):
-        us_list = torch.load(path)
-        for layer_i, layer in enumerate(SpectralNormConv2d.spectral_norm_layers):
-            setattr(layer, 'weight_u', us_list[layer_i])
-    else:
-        print("Warning! No SNU found.")
-
-def saveSNU(path):
-    us = []
-    for layer in SpectralNormConv2d.spectral_norm_layers:
-        us += [getattr(layer, 'weight_u')]
-    torch.save(us, path)
-
 class Session:
     def __init__(self):
         # Note: 4 requirements for sampling from pre-existing models:
@@ -107,6 +93,11 @@ class Session:
         self.optimizerA = optim.Adam(_adaparams, args.lr, betas=(0.0, 0.99))
 
     def save_all(self, path):
+        # Spectral Norm layers used to be stored separately for historical reasons.
+        us = []
+        for layer in SpectralNormConv2d.spectral_norm_layers:
+            us += [getattr(layer, 'weight_u')]
+
         save_dict = {'G_state_dict': self.generator.state_dict(),
                     'D_state_dict': self.encoder.state_dict(),
                     'G_running_state_dict': self.g_running.state_dict(),
@@ -115,7 +106,8 @@ class Session:
                     'optimizerA': self.optimizerA.state_dict(),
                     'iteration': self.sample_i,
                     'phase': self.phase,
-                    'alpha': self.alpha}
+                    'alpha': self.alpha,
+                    'SNU': us}
         for i,loss_param in enumerate(self.adaptive_loss):
             save_dict['adaptive_loss_{}'.format(i)] = loss_param.state_dict(),
         torch.save(save_dict, path)
@@ -123,6 +115,9 @@ class Session:
 
     def load(self, path):
         checkpoint = torch.load(path)
+
+#        import ipdb; ipdb.set_trace()
+
         self.sample_i = int(checkpoint['iteration'])
 
         importOldGen = args.import_old_gen_format
@@ -198,6 +193,13 @@ class Session:
         else:
             print('WARNING! Adaptive Loss parameters were not found in checkpoint. Loss calculations will resume without historical information.')
 
+        print("Load SNU from the model file")
+        us_list = checkpoint['SNU']
+        print(f'Found {len(us_list)} SNU entries')
+
+        for layer_i, layer in enumerate(SpectralNormConv2d.spectral_norm_layers):
+            setattr(layer, 'weight_u', us_list[layer_i])
+
     def create(self):
         if args.start_iteration <= 0:
             args.start_iteration = 1
@@ -206,15 +208,12 @@ class Session:
                 args.force_alpha = 1.0
                 print("Progressive growth disabled. Setting start step = {} and alpha = {}".format(args.start_iteration, args.force_alpha))
         else:
-            reload_from = '{}/checkpoint/{}_state'.format(args.save_dir, str(args.start_iteration).zfill(6)) #e.g. '604000' #'600000' #latest'   
-            reload_from_SNU = '{}/checkpoint/{}_SNU'.format(args.save_dir, str(args.start_iteration).zfill(6))
+            reload_from = '{}/checkpoint/{}_state.pth'.format(args.save_dir, str(args.start_iteration).zfill(6)) #e.g. '604000' #'600000' #latest'   
             print(reload_from)
             if os.path.exists(reload_from):
                 self.load(reload_from)
                 print("Loaded {}".format(reload_from))
                 print("Iteration asked {} and got {}".format(args.start_iteration, self.sample_i))               
-                if args.load_SNU:
-                    loadSNU(reload_from_SNU)
 
                 if args.testonly:
                     self.generator = copy.deepcopy(self.g_running)
@@ -693,7 +692,6 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         if batch_count % args.checkpoint_cycle == 0 or session.sample_i >= total_steps:
             for postfix in {str(session.sample_i).zfill(6)}: # 'latest'
                 session.save_all('{}/{}_state'.format(args.checkpoint_dir, postfix))
-                saveSNU('{}/{}_SNU'.format(args.checkpoint_dir, postfix))
 
             print("Checkpointed to {}".format(session.sample_i))
 
