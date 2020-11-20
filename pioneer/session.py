@@ -6,7 +6,8 @@ import os
 import copy
 
 from pioneer.robust_loss_pytorch.adaptive import AdaptiveLossFunction
-from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
+#from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
+import pioneer.model
 
 #TODO:REMOVE:
 #from pioneer import config
@@ -43,9 +44,9 @@ class Session:
             else:
                 self.device = torch.device('cpu')
 
-        self.generator = nn.DataParallel( Generator(self.nz, self.n_label).to(device=self.device) )
-        self.g_running = nn.DataParallel( Generator(self.nz, self.n_label).to(device=self.device) )
-        self.encoder   = nn.DataParallel( Discriminator(nz = self.nz,
+        self.generator = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label).to(device=self.device) )
+        self.g_running = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label).to(device=self.device) )
+        self.encoder   = nn.DataParallel( pioneer.model.Discriminator(nz = self.nz,
                                                         n_label = self.n_label,
                                                         binary_predictor = False)
                                                         .to(device=self.device) )
@@ -88,7 +89,7 @@ class Session:
     def save_all(self, path):
         # Spectral Norm layers used to be stored separately for historical reasons.
         us = []
-        for layer in SpectralNormConv2d.spectral_norm_layers:
+        for layer in pioneer.model.SpectralNormConv2d.spectral_norm_layers:
             us += [getattr(layer, 'weight_u')]
 
         save_dict = {'G_state_dict': self.generator.state_dict(),
@@ -170,7 +171,7 @@ class Session:
         us_list = checkpoint['SNU']
         print(f'Found {len(us_list)} SNU entries')
 
-        for layer_i, layer in enumerate(SpectralNormConv2d.spectral_norm_layers):
+        for layer_i, layer in enumerate(pioneer.model.SpectralNormConv2d.spectral_norm_layers):
             setattr(layer, 'weight_u', us_list[layer_i])
 
 
@@ -218,7 +219,7 @@ class Session:
                 print('Adaptive loss values have been copied over from phase {} to phase {}'.format(self.phase-1, self.phase))
 
     def getResoPhase(self):
-        gen_offset = sum(1  for j in Generator.supportBlockPoints if j <= self.phase) #TODO: Replace Generator with self.generator once the g_running is handled properly as well.
+        gen_offset = sum(1  for j in pioneer.model.Generator.supportBlockPoints if j <= self.phase) #TODO: Replace Generator with self.generator once the g_running is handled properly as well.
         return self.phase - gen_offset
 
     def getReso(self):

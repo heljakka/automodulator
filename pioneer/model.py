@@ -41,7 +41,7 @@ class SpectralNorm:
         size = weight.size()
         weight_mat = weight.contiguous().view(size[0], -1)
         if weight_mat.is_cuda:
-            u = u.to(device=args.device) #async=(args.gpu_count>1))
+            u = u.to(device=torch.device('cuda'))
         v = weight_mat.t() @ u
         v = v / v.norm()
         u = weight_mat @ v
@@ -224,7 +224,7 @@ class BlurLayer(nn.Module):
 class NoiseLayer(nn.Module):
     def __init__(self, mysize):
         super().__init__()
-        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True, device=args.device))
+        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True))
 
     def forward(self, input):
         return input + torch.normal(torch.zeros_like(input), torch.ones_like(input)) * self.noise_scale.view((1,-1,1,1))
@@ -340,15 +340,15 @@ class Generator(nn.Module):
     def __init__(self, nz, n_label=0):
         super().__init__()
         self.nz = nz
-        self.tensor_properties = torch.ones(1).to(device=args.device) #hack
+        #self.tensor_properties = torch.ones(1).to(device=args.device) #hack
         if n_label > 0:
             self.label_embed = nn.Embedding(n_label, n_label)
             self.label_embed.weight.data.normal_()
         self.code_norm = PixelNorm()
 
         self.adanorm_blocks = nn.ModuleList()
-        self.z_const = torch.ones(512, 4, 4).to(device=args.device)
-        print("AdaNorm.z_const initialized")
+        #self.z_const = torch.ones(512, 4, 4).to(device=args.device)
+
         HLM = 1 if args.small_darch else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
         progression_raw = [ConvBlock(nz, nz, 4, 3, 3, 1, spectral_norm=gen_spectral_norm, const_layer=True, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
@@ -455,7 +455,7 @@ class Generator(nn.Module):
         
         # The first conv call will start from a constant content_input defined as a class-level var in AdaNorm
         if content_input is None:
-            out = torch.ones(512, 4, 4).to(device=args.device).repeat(batchN, 1, 1, 1)
+            out = torch.ones(512, 4, 4).to(device=input.device).repeat(batchN, 1, 1, 1)
         else:
             out = content_input
 

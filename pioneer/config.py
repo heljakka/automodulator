@@ -81,6 +81,11 @@ def parse_args():
 
     parser.add_argument('--lsunm02e', action='store_true')
 
+    # These are separate for historical reasons, only their sum is relevant (e.g. 511+1)
+    parser.add_argument('--nz', type=int, default=511)
+    parser.add_argument('--n_label', type=int, default=1)
+
+
     return parser.parse_args()
 
 args = None
@@ -108,8 +113,6 @@ def init():
 
     assert(args.step_offset != 0 or args.phase_offset == 0)
 
-    args.n_label = 1
-    args.nz = 512 - args.n_label
     args.n_critic = 1
     args.nc = 3
 
