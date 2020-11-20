@@ -13,16 +13,17 @@ from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
 #args   = config.get_config()
 
 class Session:
-    def __init__(self, start_iteration = -1, nz=512, n_label=1, phase=-1, max_phase=7,
+    def __init__(self, pretrained=False, start_iteration = -1, nz=512, n_label=1, phase=-1, max_phase=7,
                  match_x_metric='robust', lr=0.0001, reset_optimizers=-1, no_progression=False,
-                 images_per_stage=2400e3, device=None):
+                 images_per_stage=2400e3, device=None, force_alpha=-1, save_dir=None):
         # Note: 3 requirements for sampling from pre-existing models:
         # 1) Ensure you save and load both Generator and Encoder multi-gpu versions (DataParallel) or both not.
         # 2) Ensure you set the same phase value as the pre-existing model and that your local and global alpha=1.0 are set
         # 3) Sample from the g_running, not from the latest generator
 
         self.alpha = -1
-        self.sample_i = start_iteration
+        self.requested_start_iteration = start_iteration
+        self.sample_i = max(1, start_iteration)
         self.nz = nz
         self.n_label = n_label
         self.phase = phase
@@ -54,6 +55,15 @@ class Session:
         self.adaptive_loss_N = 9
 
         self.reset_opt()
+
+        if self.requested_start_iteration <= 0 and self.no_progression:
+            self.sample_i = int( (self.max_phase + 0.5) * self.images_per_stage ) # Start after the fade-in stage of the last iteration
+            self.alpha = 1.0
+            print("Progressive growth disabled. Setting start step = {} and alpha = {}".format(self.sample_i, force_alpha))
+
+        # You can construct this model first and the load the model in later, or if pretrained=True, we load it here already:
+        if pretrained:
+            self.create(save_dir=save_dir,force_alpha=force_alpha)
 
         print('Session created.')
 
@@ -96,9 +106,7 @@ class Session:
         torch.save(save_dict, path)
         print("Adaptive Losses saved.")
 
-    def load(self, path):
-        checkpoint = torch.load(path)
-
+    def _load(self, checkpoint):
         self.sample_i = int(checkpoint['iteration'])
 
         loadGeneratorWithNoise = True
@@ -165,36 +173,38 @@ class Session:
         for layer_i, layer in enumerate(SpectralNormConv2d.spectral_norm_layers):
             setattr(layer, 'weight_u', us_list[layer_i])
 
-    def create(self, save_dir, is_evaluation, force_alpha = -1):
-        print(f'sample i: {self.sample_i}')
-        if self.sample_i <= 0:
-            self.sample_i = 1
-            if self.no_progression:
-                self.sample_i = int( (self.max_phase + 0.5) * self.images_per_stage ) # Start after the fade-in stage of the last iteration
-                force_alpha = 1.0
-                print("Progressive growth disabled. Setting start step = {} and alpha = {}".format(self.sample_i, force_alpha))
-        else:
-            reload_from = '{}/checkpoint/{}_state.pth'.format(save_dir, str(self.sample_i).zfill(6)) #e.g. '604000' #'600000' #latest'   
-            print(reload_from)
-            if os.path.exists(reload_from):
-                requested_checkpoint = self.sample_i
-                self.load(reload_from)
-                print("Loaded {}".format(reload_from))
-                print("Iteration asked {} and got {}".format(requested_checkpoint, self.sample_i))               
 
-                if is_evaluation:
-                    self.generator = copy.deepcopy(self.g_running)
-            else:
-                assert(not is_evaluation)
-                print('Start from iteration {}'.format(self.sample_i))
+    # If evaluation mode, then pretrained=True by assumption and generator <- g_running.
+    # In not evaluation, then vice versa.
+
+    def eval(self):
+        self.generator = copy.deepcopy(self.g_running)
+
+    def train(self):
+        accumulate(self.g_running, self.generator, 0)
+
+    # Wraps the load operations
+    def create(self, save_dir, force_alpha = -1):
+        is_remote_load = save_dir.find('http') != -1
+
+        if not is_remote_load:
+            if self.requested_start_iteration > 1:
+                reload_from = '{}/checkpoint/{}_state.pth'.format(save_dir, str(self.requested_start_iteration).zfill(6)) #e.g. '604000' #'600000' #latest'   
+                print(reload_from)
+                if os.path.exists(reload_from):
+                    self._load(torch.load(reload_from))
+                    print("Loaded {}".format(reload_from))
+                    print("Iteration asked {} and got {}".format(self.requested_start_iteration, self.sample_i))               
+                else:
+                    print('Start from iteration {} without pre-loading!'.format(self.sample_i))
+        else:
+            print(f'Remote load from {save_dir}')
+            self._load(torch.hub.load_state_dict_from_url(save_dir, progress=False))
 
         self.g_running.train(False)
 
         if force_alpha >= 0.0:
             self.alpha = force_alpha
-
-        if not is_evaluation:
-            accumulate(self.g_running, self.generator, 0)
 
     def prepareAdaptiveLossForNewPhase(self):
         if self.match_x_metric != 'robust':

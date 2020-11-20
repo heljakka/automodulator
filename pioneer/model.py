@@ -337,7 +337,7 @@ class ConvBlock(nn.Module):
 gen_spectral_norm = False
 debug_ada = False
 class Generator(nn.Module):
-    def __init__(self, nz, n_label=0): #TODO remove code_dim arg (unused)
+    def __init__(self, nz, n_label=0):
         super().__init__()
         self.nz = nz
         self.tensor_properties = torch.ones(1).to(device=args.device) #hack

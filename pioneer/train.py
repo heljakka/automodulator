@@ -547,11 +547,12 @@ def makeTS(opts, session):
 
     return ts
 
-
 def main():
     setup()
 
-    session = Session(args.start_iteration,
+    #Here, we load pretrained model after construction.
+    session = Session(False, #pretrained=
+                        args.start_iteration,
                         args.nz+1,
                         args.n_label,
                         args.start_phase,
@@ -563,7 +564,11 @@ def main():
                         args.images_per_stage,
                         args.device)
 
-    session.create(args.save_dir, args.testonly, args.force_alpha)
+    session.create(args.save_dir, args.force_alpha)
+    if args.testonly:
+        session.eval()
+    else:
+        session.train()
 
     print('PyTorch {}'.format(torch.__version__))
 
