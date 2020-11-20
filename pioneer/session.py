@@ -9,9 +9,24 @@ from pioneer.robust_loss_pytorch.adaptive import AdaptiveLossFunction
 #from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
 import pioneer.model
 
-#TODO:REMOVE:
-#from pioneer import config
-#args   = config.get_config()
+def batch_size(reso):
+    gpus = torch.cuda.device_count()
+    if gpus == 1:
+        save_memory = False
+        if not save_memory:
+            batch_table = {4:128, 8:128, 16:128, 32:64, 64:32, 128:32, 256:16, 512:4, 1024:1}
+        else:
+            batch_table = {4:64, 8:32, 16:32, 32:32, 64:16, 128:14, 256:2, 512:2, 1024:1}
+    elif gpus == 2:
+        batch_table = {4:256, 8:256, 16:256, 32:128, 64:64, 128:28, 256:32, 512:14, 1024:2}
+    elif gpus == 4:
+        batch_table = {4:512, 8:256, 16:128, 32:64, 64:32, 128:64, 256:64, 512:32, 1024:4}
+    elif gpus == 8:
+        batch_table = {4:512, 8:512, 16:512, 32:256, 64:256, 128:128, 256:64, 512:32, 1024:8}
+    else:
+        assert(False)
+    
+    return batch_table[reso]
 
 class Session:
     def __init__(self, pretrained=False, start_iteration = -1, nz=512, n_label=1, phase=-1, max_phase=7,

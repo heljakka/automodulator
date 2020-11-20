@@ -33,24 +33,6 @@ from pioneer.robust_loss_pytorch.adaptive import AdaptiveLossFunction
 args   = config.get_config()
 writer = None
 
-def batch_size(reso):
-    if args.gpu_count == 1:
-        save_memory = False
-        if not save_memory:
-            batch_table = {4:128, 8:128, 16:128, 32:64, 64:32, 128:32, 256:16, 512:4, 1024:1}
-        else:
-            batch_table = {4:64, 8:32, 16:32, 32:32, 64:16, 128:14, 256:2, 512:2, 1024:1}
-    elif args.gpu_count == 2:
-        batch_table = {4:256, 8:256, 16:256, 32:128, 64:64, 128:28, 256:32, 512:14, 1024:2}
-    elif args.gpu_count == 4:
-        batch_table = {4:512, 8:256, 16:128, 32:64, 64:32, 128:64, 256:64, 512:32, 1024:4}
-    elif args.gpu_count == 8:
-        batch_table = {4:512, 8:512, 16:512, 32:256, 64:256, 128:128, 256:64, 512:32, 1024:8}
-    else:
-        assert(False)
-    
-    return batch_table[reso]
-
 def setup():
     config.init()
     
@@ -420,7 +402,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             session.prepareAdaptiveLossForNewPhase()
             refresh_adaptiveLoss = False
         if refresh_dataset:
-            train_dataset = data.Utils.sample_data2(train_data_loader, batch_size(reso), reso, session)
+            train_dataset = data.Utils.sample_data2(train_data_loader, session.getBatchSize(), reso, session)
             refresh_dataset = False
             print("Refreshed dataset. Alpha={} and iteration={}".format(session.alpha, sample_i_current_stage))
         if refresh_imagePool:
@@ -437,13 +419,13 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         try:
             real_image, _ = next(train_dataset)              
         except (OSError, StopIteration):
-            train_dataset = data.Utils.sample_data2(train_data_loader, batch_size(reso), reso, session)
+            train_dataset = data.Utils.sample_data2(train_data_loader, session.getBatchSize(), reso, session)
             real_image, _ = next(train_dataset)
 
         ####################### DISCRIMINATOR / ENCODER ###########################
 
         utils.switch_grad_updates_to_first_of(encoder, generator)
-        kls = encoder_train(session, real_image, generatedImagePool, batch_size(reso), match_x, stats, "", margin = sched.m)
+        kls = encoder_train(session, real_image, generatedImagePool, session.getBatchSize(), match_x, stats, "", margin = sched.m)
 
         ######################## GENERATOR / DECODER #############################
 
@@ -451,7 +433,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             utils.switch_grad_updates_to_first_of(generator, encoder)
             
             for _ in range(args.n_generator):               
-                kls = decoder_train(session, batch_size(reso), stats, kls, real_image.data)
+                kls = decoder_train(session, session.getBatchSize(), stats, kls, real_image.data)
 
             accumulate(g_running, generator)
 
@@ -476,8 +458,8 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             ('{0}; it: {1}; phase: {2}; b: {3:.1f}; Alpha: {4:.3f}; Reso: {5}; E: {6:.2f}; KL(Phi(x)/Phi(G0)/Phi(G1)/Phi(G2)): {7}; z-reco: {8:.2f}; x-reco {9:.3f}; real_var {10:.6f}; fake_var {11:.6f}; z-mix: {12:.4f};').format(batch_count+1, session.sample_i+1, session.phase, b, session.alpha, reso, e, kls, zr, xr, stats['real_var'], stats['fake_var'], float(stats['z_mix_reconstruction_error']))
             )
 
-        pbar.update(batch_size(reso))
-        session.sample_i += batch_size(reso) # if not benchmarking else 100
+        pbar.update(b)
+        session.sample_i += b # if not benchmarking else 100
         batch_count += 1
 
         ########################  Saving ######################## 
