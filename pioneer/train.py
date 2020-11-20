@@ -8,7 +8,7 @@ from torch.autograd import Variable, grad
 from torchvision import utils
 
 from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
-from pioneer.session import Session
+from pioneer.session import Session, accumulate
 
 from datetime import datetime
 import random
@@ -70,13 +70,6 @@ def setup():
     random.seed(args.manual_seed)
     torch.manual_seed(args.manual_seed)
     torch.cuda.manual_seed_all(args.manual_seed)   
-
-def accumulate(model1, model2, decay=0.999):
-    par1 = dict(model1.named_parameters())
-    par2 = dict(model2.named_parameters())
-
-    for k in par1.keys():
-        par1[k].data.mul_(decay).add_(1 - decay, par2[k].data)
 
 class KLN01Loss(torch.nn.Module): #Adapted from https://github.com/DmitryUlyanov/AGE
 
@@ -557,8 +550,20 @@ def makeTS(opts, session):
 
 def main():
     setup()
-    session = Session()
-    session.create()
+
+    session = Session(args.start_iteration,
+                        args.nz+1,
+                        args.n_label,
+                        args.start_phase,
+                        args.max_phase,
+                        args.match_x_metric,
+                        args.lr,
+                        args.reset_optimizers,
+                        args.no_progression,
+                        args.images_per_stage,
+                        args.device)
+
+    session.create(args.save_dir, args.testonly, args.force_alpha)
 
     print('PyTorch {}'.format(torch.__version__))
 

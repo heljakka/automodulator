@@ -74,7 +74,6 @@ class SpectralNorm:
         if not args.testonly:
             setattr(module, self.name + '_u', u)
 
-
 def spectral_norm(module, name='weight'):
     SpectralNorm.apply(module, name)
 
@@ -338,13 +337,14 @@ class ConvBlock(nn.Module):
 gen_spectral_norm = False
 debug_ada = False
 class Generator(nn.Module):
-    def __init__(self, nz, n_label=10): #TODO remove code_dim arg (unused)
+    def __init__(self, nz, n_label=0): #TODO remove code_dim arg (unused)
         super().__init__()
         self.nz = nz
         self.tensor_properties = torch.ones(1).to(device=args.device) #hack
-        self.label_embed = nn.Embedding(n_label, n_label)
+        if n_label > 0:
+            self.label_embed = nn.Embedding(n_label, n_label)
+            self.label_embed.weight.data.normal_()
         self.code_norm = PixelNorm()
-        self.label_embed.weight.data.normal_()
 
         self.adanorm_blocks = nn.ModuleList()
         self.z_const = torch.ones(512, 4, 4).to(device=args.device)
