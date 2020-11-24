@@ -33,6 +33,14 @@ class SpectralNorm:
     def __init__(self, name):
         self.name = name
 
+    @staticmethod
+    def eval():
+        SpectralNorm._is_eval = True
+
+    @staticmethod
+    def train():
+        SpectralNorm._is_eval = False
+
     def compute_weight(self, module):
         weight = getattr(module, self.name + '_orig')
 
@@ -71,7 +79,7 @@ class SpectralNorm:
         weight_sn, u = self.compute_weight(module)
         setattr(module, self.name, weight_sn)
         # When a state SNU is reloaded (always the case in test mode), we do not want to change weight_u matrix anymore. This caused a bug in style decoder, though the same did not occur for the classical architecture. The symptom: Only the very first decoding run works properly, any batch after that will have its weights collapse to some static value (essentially always the same static image gets generated).
-        if not args.testonly:
+        if not SpectralNorm._is_eval:
             setattr(module, self.name + '_u', u)
 
 def spectral_norm(module, name='weight'):
@@ -406,12 +414,22 @@ class Generator(nn.Module):
 
         mapping_lrmul = 0.01
 
+        self.use_layer_noise = (not args.no_LN and args.flip_invariance_layer <= -1)
+
         self.z_preprocess = nn.Sequential(
                     nn.Sequential(equal_lr(nn.Linear(nz, nz), gain=mapping_lrmul), nn.LeakyReLU(0.2)),
                     nn.Sequential(equal_lr(nn.Linear(nz, nz), gain=mapping_lrmul), nn.LeakyReLU(0.2)))
 
         init_linear(self.z_preprocess[0][0], lr_gain=mapping_lrmul)
         init_linear(self.z_preprocess[1][0], lr_gain=mapping_lrmul)
+
+    @property
+    def use_layer_noise(self):
+        return self.__use_layer_noise
+
+    @use_layer_noise.setter
+    def use_layer_noise(self, use_layer_noise):
+        self.__use_layer_noise = use_layer_noise
 
     def create(self):
         print("::create() n/i")
@@ -432,8 +450,6 @@ class Generator(nn.Module):
             return content_input
 
         assert(not input is None)
-
-        self.use_layer_noise = not args.no_LN and args.flip_invariance_layer <= -1
 
         # Label is reserved for future use. Make None if not in use. #label = self.label_embed(label)
         if not label is None:
@@ -565,7 +581,7 @@ class Discriminator(nn.Module):
         if self.binary_predictor:
             self.linear = nn.Linear(nz, 1 + n_label)
     c = 0
-    def forward(self, input, step, alpha, use_ALQ):
+    def forward(self, input, step, alpha, unused_arg=False):
         for i in range(step, -1, -1):
             index = self.n_layer - i - 1
 
@@ -586,6 +602,7 @@ class Discriminator(nn.Module):
                     skip_rgb = F.avg_pool2d(input, 2)
                     skip_rgb = self.from_rgb[index + 1](skip_rgb)
                     out = (1 - alpha) * skip_rgb + alpha * out
+        
         z_out = out.squeeze(2).squeeze(2)
 
         if self.binary_predictor:
