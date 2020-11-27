@@ -8,6 +8,11 @@ import copy
 from pioneer.robust_loss_pytorch.adaptive import AdaptiveLossFunction
 #from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
 import pioneer.model
+from torchvision import transforms
+
+from torch.autograd import Variable
+from torch import randn
+from pioneer.utils import normalize
 
 def batch_size(reso):
     gpus = torch.cuda.device_count()
@@ -31,7 +36,7 @@ def batch_size(reso):
 class Session:
     def __init__(self, pretrained=False, start_iteration = -1, nz=512, n_label=1, phase=-1, max_phase=7,
                  match_x_metric='robust', lr=0.0001, reset_optimizers=-1, no_progression=False,
-                 images_per_stage=2400e3, device=None, force_alpha=-1, save_dir=None):
+                 images_per_stage=2400e3, device=None, force_alpha=-1, save_dir=None, transform_key=None):
         # Note: 3 requirements for sampling from pre-existing models:
         # 1) Ensure you save and load both Generator and Encoder multi-gpu versions (DataParallel) or both not.
         # 2) Ensure you set the same phase value as the pre-existing model and that your local and global alpha=1.0 are set
@@ -52,6 +57,7 @@ class Session:
         self.no_progression = no_progression
 
         self.device = device
+        self.transform_key = transform_key
 
         if self.device is None:
             if torch.cuda.is_available():
@@ -82,6 +88,19 @@ class Session:
             self.create(save_dir=save_dir,force_alpha=force_alpha)
 
         print('Session created.')
+
+    def tf(self):
+        if self.transform_key in ['celebahq', 'ffhq512', 'ffhq256']:
+            maxReso = 512 if self.transform_key == 'ffhq512' else 256
+            return transforms.Compose([
+                            transforms.Resize(maxReso),
+                            transforms.CenterCrop(maxReso),
+                            transforms.Resize(self.getReso()),
+                            transforms.ToTensor(),
+                            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                        ])
+        else:
+            return lambda x: x
 
     def reset_opt(self):
         self.adaptive_loss = []
@@ -152,7 +171,7 @@ class Session:
             for opt in opts:
                 for param_group in opt.param_groups:
                     if param_group['lr'] != self.lr:
-                        print("LR in optimizer update: {} => {}".format(param_group['lr'], args.lr))
+                        print("LR in optimizer update: {} => {}".format(param_group['lr'], self.lr))
                         param_group['lr'] = self.lr
 
             print("Reloaded old optimizers")
@@ -165,8 +184,10 @@ class Session:
         if self.phase > 0: #If the start phase has been manually set, try to actually use it (e.g. when have trained 64x64 for extra rounds and then turning the model over to 128x128)
             self.phase = min(loaded_phase, self.phase)
             print("Use start phase: {}".format(self.phase))
+        else:
+            self.phase = loaded_phase
         if loaded_phase > self.max_phase:
-            print('Warning! Loaded model claimed phase {} but max_phase={}'.format(self.phase, args.max_phase))
+            print('Warning! Loaded model claimed phase {} but max_phase={}'.format(self.phase, self.max_phase))
             self.phase = self.max_phase
         akeys_ok = True
 
@@ -193,11 +214,14 @@ class Session:
     # If evaluation mode, then pretrained=True by assumption and generator <- g_running.
     # In not evaluation, then vice versa.
 
-    def eval(self):
+    def eval(self, useLN = True):
+        self.g_running.module.use_layer_noise = useLN
         self.generator = copy.deepcopy(self.g_running)
+        pioneer.model.SpectralNorm.eval()
 
     def train(self):
         accumulate(self.g_running, self.generator, 0)
+        pioneer.model.SpectralNorm.train()
 
     # Wraps the load operations
     def create(self, save_dir, force_alpha = -1):
@@ -243,9 +267,78 @@ class Session:
     def getBatchSize(self):
         return batch_size(self.getReso())
 
+    # Evaluation Helpers
+
+    def reconstruct(session, imgs):
+        with torch.no_grad():
+            return self.decode( self.encode(imgs) )
+
+    def generate(self, num_imgs):
+        myz = Variable(torch.randn(num_imgs, 512)).cuda()
+        myz = pioneer.utils.normalize(myz)
+        
+        return self.g_running(
+            myz,
+            None,
+            self.phase,
+            1.0).detach()
+
+    def encode(self, imgs):
+        if imgs.shape.__len__() == 3:
+            imgs = imgs.unsqueeze(0)
+        return self.encoder(imgs, self.getResoPhase(), 1.0)
+
+    def decode(self, z):
+        if isinstance(z, ScaledBuilder):
+            return pioneer.utils.gen_seq(z.z_seq, self.g_running, self).detach()
+        else:
+            if z.shape.__len__() == 1:
+                z = z.unsqueeze(0)
+            return self.g_running(z, None, self.getResoPhase(), 1.0).detach()
+
+
 def accumulate(model1, model2, decay=0.999):
     par1 = dict(model1.named_parameters())
     par2 = dict(model2.named_parameters())
 
     for k in par1.keys():
         par1[k].data.mul_(decay).add_(1 - decay, par2[k].data)
+
+class ScaledBuilder():
+    _supported_max_stack_size = 9
+    def __init__(self, batch_size=1, nz = 512):
+        self._z_stack = Variable(torch.randn(batch_size, 1, nz).repeat(1,  ScaledBuilder._supported_max_stack_size, 1)).cuda()
+            #torch.randn(batch_size, ScaledBuilder._supported_max_stack_size, nz)).cuda()
+        for i in range( ScaledBuilder._supported_max_stack_size ):
+            self._z_stack[:,i,:] = normalize(self._z_stack[:,i,:]) #Normalize each modulator separately
+
+    def use(self, z, mod_range):
+        assert(len(mod_range) == 2 and mod_range[0] >= -1 and mod_range[1] <= ScaledBuilder._supported_max_stack_size)
+        if mod_range[1] == -1:
+            mod_range[1] = ScaledBuilder._supported_max_stack_size
+
+        with torch.no_grad():
+            self._z_stack[:,range(*mod_range),:] = z
+
+        return self
+
+    def lo(self, z):
+        with torch.no_grad():
+            self._z_stack[:,:2,:] = z
+        return self
+    def mid(self, z):
+        with torch.no_grad():
+            self._z_stack[:,2:4,:] = z
+        return self
+    def hi(self, z):
+        with torch.no_grad():
+            self._z_stack[:,5:,:] = z
+        return self
+
+    @property
+    def z(self):
+        return self._z_stack
+
+    @property
+    def z_seq(self):
+        return [(self._z_stack[:,i,:], i, i+1) for i in range(ScaledBuilder._supported_max_stack_size)] #into the format expected by utils.gen_seq
