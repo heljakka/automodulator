@@ -544,11 +544,12 @@ def main():
                         args.reset_optimizers,
                         args.no_progression,
                         args.images_per_stage,
-                        args.device)
+                        args.device,
+                        arch = 'small' if args.small_darch else None)
 
     session.create(args.save_dir, args.force_alpha)
     if args.testonly:
-        session.eval()
+        session.eval(useLN = not args.no_LN)
     else:
         session.train()
 

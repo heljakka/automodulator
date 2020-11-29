@@ -345,7 +345,7 @@ class ConvBlock(nn.Module):
 gen_spectral_norm = False
 debug_ada = False
 class Generator(nn.Module):
-    def __init__(self, nz, n_label=0):
+    def __init__(self, nz, n_label=0, arch=None):
         super().__init__()
         self.nz = nz
         #self.tensor_properties = torch.ones(1).to(device=args.device) #hack
@@ -357,7 +357,7 @@ class Generator(nn.Module):
         self.adanorm_blocks = nn.ModuleList()
         #self.z_const = torch.ones(512, 4, 4).to(device=args.device)
 
-        HLM = 1 if args.small_darch else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
+        HLM = 1 if arch=='small' else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
         progression_raw = [ConvBlock(nz, nz, 4, 3, 3, 1, spectral_norm=gen_spectral_norm, const_layer=True, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),

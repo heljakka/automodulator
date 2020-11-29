@@ -36,7 +36,8 @@ def batch_size(reso):
 class Session:
     def __init__(self, pretrained=False, start_iteration = -1, nz=512, n_label=1, phase=-1, max_phase=7,
                  match_x_metric='robust', lr=0.0001, reset_optimizers=-1, no_progression=False,
-                 images_per_stage=2400e3, device=None, force_alpha=-1, save_dir=None, transform_key=None):
+                 images_per_stage=2400e3, device=None, force_alpha=-1, save_dir=None, transform_key=None,
+                 arch=None):
         # Note: 3 requirements for sampling from pre-existing models:
         # 1) Ensure you save and load both Generator and Encoder multi-gpu versions (DataParallel) or both not.
         # 2) Ensure you set the same phase value as the pre-existing model and that your local and global alpha=1.0 are set
@@ -65,8 +66,8 @@ class Session:
             else:
                 self.device = torch.device('cpu')
 
-        self.generator = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label).to(device=self.device) )
-        self.g_running = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label).to(device=self.device) )
+        self.generator = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label, arch=arch).to(device=self.device) )
+        self.g_running = nn.DataParallel( pioneer.model.Generator(self.nz, self.n_label, arch=arch).to(device=self.device) )
         self.encoder   = nn.DataParallel( pioneer.model.Discriminator(nz = self.nz,
                                                         n_label = self.n_label,
                                                         binary_predictor = False)
@@ -90,17 +91,14 @@ class Session:
         print('Session created.')
 
     def tf(self):
-        if self.transform_key in ['celebahq', 'ffhq512', 'ffhq256']:
-            maxReso = 512 if self.transform_key == 'ffhq512' else 256
-            return transforms.Compose([
-                            transforms.Resize(maxReso),
-                            transforms.CenterCrop(maxReso),
-                            transforms.Resize(self.getReso()),
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                        ])
-        else:
-            return lambda x: x
+        maxReso = 512 if self.transform_key == 'ffhq512' else 256
+        return transforms.Compose([
+                        transforms.Resize(maxReso),
+                        transforms.CenterCrop(maxReso),
+                        transforms.Resize(self.getReso()),
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                    ])
 
     def reset_opt(self):
         self.adaptive_loss = []
@@ -322,7 +320,7 @@ class ScaledBuilder():
 
         return self
 
-    def lo(self, z):
+    def hi(self, z):
         with torch.no_grad():
             self._z_stack[:,:2,:] = z
         return self
@@ -330,7 +328,7 @@ class ScaledBuilder():
         with torch.no_grad():
             self._z_stack[:,2:4,:] = z
         return self
-    def hi(self, z):
+    def lo(self, z):
         with torch.no_grad():
             self._z_stack[:,5:,:] = z
         return self
