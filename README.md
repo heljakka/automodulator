@@ -8,7 +8,7 @@
 Code for the paper:
 * Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321). NeurIPS 2020, to appear.
 
-Implementation by **Ari Heljakka** (drawing from [2-4], h5tool from [5]).
+Implementation by **Ari Heljakka** (code adapted from [2-5], metrics from [6-7], h5tool from [8]).
 
 ## Pre-requisites
 
@@ -163,7 +163,13 @@ Support and email replies are not always guaranteed, but we will appreciate and 
 
 [4] https://github.com/DmitryUlyanov/AGE
 
-[5] Karras, T., Aila, T., Laine, S., and Lehtinen, J. (2018). **Progressive growing of GANs for improved quality, stability, and variation**. In: *International Conference on Learning Representations (ICLR)*. https://github.com/tkarras/progressive_growing_of_gans
+[5] Barron, J. T. (2019). **A General and Adaptive Robust Loss Function** In: *CVPR*. https://github.com/jonbarron/robust_loss_pytorch
+
+[6] Zhang, R. and Isola, P. and Efros, A. A. and Shechtman, E. and Wang, O. (2018). **The Unreasonable Effectiveness of Deep Features as a Perceptual Metric** In: *CVPR*. https://github.com/richzhang/PerceptualSimilarity
+
+[7] https://github.com/mseitzer/pytorch-fid
+
+[8] Karras, T., Aila, T., Laine, S., and Lehtinen, J. (2018). **Progressive growing of GANs for improved quality, stability, and variation**. In: *International Conference on Learning Representations (ICLR)*. https://github.com/tkarras/progressive_growing_of_gans
 
 ## License
 
