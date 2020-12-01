@@ -326,8 +326,10 @@ class AdaptiveImageLossFunction(nn.Module):
           wavelet.rescale(
               wavelet.construct(x_stack, self.wavelet_num_levels,
                                 self.representation), self.wavelet_scale_base))
-    elif self.representation == 'DCT':
-      x_stack = util.image_dct(x_stack)
+    ## Disabled to remove the dct library dependency:
+    ## elif self.representation == 'DCT':
+    ##  x_stack = util.image_dct(x_stack)
+
     # If `representation` == 'PIXEL', do nothing.
 
     # Reshape `x_stack` from

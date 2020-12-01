@@ -27,7 +27,7 @@ from __future__ import print_function
 import numbers
 
 from pkg_resources import resource_stream
-import mpmath
+#import mpmath
 import numpy as np
 import torch
 from pioneer.robust_loss_pytorch import cubic_spline
@@ -35,57 +35,7 @@ from pioneer.robust_loss_pytorch import general
 from pioneer.robust_loss_pytorch import util
 
 
-def analytical_base_partition_function(numer, denom):
-  r"""Accurately approximate the partition function Z(numer / denom).
-
-  This uses the analytical formulation of the true partition function Z(alpha),
-  as described in the paper (the math after Equation 18), where alpha is a
-  positive rational value numer/denom. This is expensive to compute and not
-  differentiable, so it is only used for unit tests.
-
-  Args:
-    numer: the numerator of alpha, an integer >= 0.
-    denom: the denominator of alpha, an integer > 0.
-
-  Returns:
-    Z(numer / denom), a double-precision float, accurate to around 9 digits
-    of precision.
-
-  Raises:
-      ValueError: If `numer` is not a non-negative integer or if `denom` is not
-        a positive integer.
-  """
-  if not isinstance(numer, numbers.Integral):
-    raise ValueError('Expected `numer` of type int, but is of type {}'.format(
-        type(numer)))
-  if not isinstance(denom, numbers.Integral):
-    raise ValueError('Expected `denom` of type int, but is of type {}'.format(
-        type(denom)))
-  if not numer >= 0:
-    raise ValueError('Expected `numer` >= 0, but is = {}'.format(numer))
-  if not denom > 0:
-    raise ValueError('Expected `denom` > 0, but is = {}'.format(denom))
-
-  alpha = numer / denom
-
-  # The Meijer-G formulation of the partition function has singularities at
-  # alpha = 0 and alpha = 2, but at those special cases the partition function
-  # has simple closed forms which we special-case here.
-  if alpha == 0:
-    return np.pi * np.sqrt(2)
-  if alpha == 2:
-    return np.sqrt(2 * np.pi)
-
-  # Z(n/d) as described in the paper.
-  a_p = (np.arange(1, numer, dtype=np.float64) / numer).tolist()
-  b_q = ((np.arange(-0.5, numer - 0.5, dtype=np.float64)) /
-         numer).tolist() + (np.arange(1, 2 * denom, dtype=np.float64) /
-                            (2 * denom)).tolist()
-  z = (1. / numer - 1. / (2 * denom))**(2 * denom)
-  mult = np.exp(np.abs(2 * denom / numer - 1.)) * np.sqrt(
-      np.abs(2 * denom / numer - 1.)) * (2 * np.pi)**(1 - denom)
-  return mult * np.float64(mpmath.meijerg([[], a_p], [b_q, []], z))
-
+#Note: Removed analytical_base_partition_function(numer, denom) to remove redundant dependency to mpmath
 
 def partition_spline_curve(alpha):
   """Applies a curve to alpha >= 0 to compress its range before interpolation.
