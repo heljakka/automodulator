@@ -237,7 +237,7 @@ class Session:
                     print('Start from iteration {} without pre-loading!'.format(self.sample_i))
         else:
             print(f'Remote load from {save_dir}')
-            self._load(torch.hub.load_state_dict_from_url(save_dir, progress=False))
+            self._load(torch.hub.load_state_dict_from_url(save_dir, progress=True))
 
         self.g_running.train(False)
 
@@ -293,6 +293,13 @@ class Session:
             if z.shape.__len__() == 1:
                 z = z.unsqueeze(0)
             return self.g_running(z, None, self.getResoPhase(), 1.0).detach()
+
+    def zbuilder(self, **kwargs):
+        """ We allow accessing the ScaledBuilder here so that it can be accessed via the loaded Session via PyTorch Hub
+        """
+
+        return ScaledBuilder(kwargs)
+
 
 
 def accumulate(model1, model2, decay=0.999):
