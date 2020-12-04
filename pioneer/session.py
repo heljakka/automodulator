@@ -298,7 +298,7 @@ class Session:
         """ We allow accessing the ScaledBuilder here so that it can be accessed via the loaded Session via PyTorch Hub
         """
 
-        return ScaledBuilder(kwargs)
+        return ScaledBuilder(**kwargs)
 
 
 
