@@ -38,8 +38,7 @@ def parse_args():
     parser.add_argument('--match_z_metric', default='cos', help='none|L1|L2|cos')
     parser.add_argument('--noise', default='sphere', help='normal|sphere')
     parser.add_argument('--summary_dir', default='log/pine/runs', help='Tensorflow summaries directory')
-    parser.add_argument('--save_dir', default='tests',
-                    help='folder to output images')
+    parser.add_argument('--save_dir', default=None, help='folder to output images')
     parser.add_argument('--no_TB', action='store_true', help='Do not create Tensorboard logs')
     parser.add_argument('--start_iteration', type=int, default=0)
     parser.add_argument('--lr', type=float, default=0.001)
@@ -84,6 +83,8 @@ def parse_args():
     # These are separate for historical reasons, only their sum is relevant (e.g. 511+1)
     parser.add_argument('--nz', type=int, default=511)
     parser.add_argument('--n_label', type=int, default=1)
+    parser.add_argument('--hub', type=str, default='AaltoVision/automodulator', help='The hub from which to load the models, unless (local) save_dir is not given. E.g. AaltoVision/automodulator:master')
+    parser.add_argument('--hub_model', type=str, choices=['lsunbedrooms256', 'lsuncars256', 'celebahq256','ffhq256','ffhq512'])
 
 
     return parser.parse_args()
@@ -174,7 +175,9 @@ def init():
     print("Total training samples up to {}k. Max phase for dataset {} is {}. Once the maximum phase is trained the full round, we continue training that phase.".format(args.total_kimg, args.data, args.max_phase))
 
     import os
-    if args.start_iteration==-1:
+    # If save_dir is provided but checkpoint ID (start_iteration) is not, we try loading the latest iteration.
+    # If save_dir is not given, both the checkpoint ID and the model are loaded from the Hub
+    if args.start_iteration==-1 and not args.save_dir is None:
         cppath = args.save_dir + '/checkpoint'
         if os.path.exists(cppath):
             for filename in os.listdir(cppath):
@@ -190,7 +193,6 @@ def init():
         else:
             args.start_iteration = 0
             print('start_iteration=-1 given which indicates the latest state, but no state found. Starting from step 0.');
-   
 
 def get_config():
     global args
