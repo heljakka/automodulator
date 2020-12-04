@@ -130,7 +130,7 @@ def init():
     args.fake_G_KL_scale = args.fake_D_KL_scale
     args.real_x_KL_scale = 0.1
 
-    args.use_TB = not args.no_TB
+    args.use_TB = not args.no_TB and not args.testonly
     args.load_SNU = not args.no_load_SNU
     args.use_layer_noise = not args.no_LN
 
