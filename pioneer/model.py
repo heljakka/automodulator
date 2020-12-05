@@ -33,6 +33,14 @@ class SpectralNorm:
     def __init__(self, name):
         self.name = name
 
+    @staticmethod
+    def eval():
+        SpectralNorm._is_eval = True
+
+    @staticmethod
+    def train():
+        SpectralNorm._is_eval = False
+
     def compute_weight(self, module):
         weight = getattr(module, self.name + '_orig')
 
@@ -41,7 +49,7 @@ class SpectralNorm:
         size = weight.size()
         weight_mat = weight.contiguous().view(size[0], -1)
         if weight_mat.is_cuda:
-            u = u.to(device=args.device) #async=(args.gpu_count>1))
+            u = u.to(device=torch.device('cuda'))
         v = weight_mat.t() @ u
         v = v / v.norm()
         u = weight_mat @ v
@@ -71,9 +79,8 @@ class SpectralNorm:
         weight_sn, u = self.compute_weight(module)
         setattr(module, self.name, weight_sn)
         # When a state SNU is reloaded (always the case in test mode), we do not want to change weight_u matrix anymore. This caused a bug in style decoder, though the same did not occur for the classical architecture. The symptom: Only the very first decoding run works properly, any batch after that will have its weights collapse to some static value (essentially always the same static image gets generated).
-        if not args.testonly:
+        if not SpectralNorm._is_eval:
             setattr(module, self.name + '_u', u)
-
 
 def spectral_norm(module, name='weight'):
     SpectralNorm.apply(module, name)
@@ -225,7 +232,7 @@ class BlurLayer(nn.Module):
 class NoiseLayer(nn.Module):
     def __init__(self, mysize):
         super().__init__()
-        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True, device=args.device))
+        self.noise_scale = nn.Parameter(torch.zeros(mysize, requires_grad=True))
 
     def forward(self, input):
         return input + torch.normal(torch.zeros_like(input), torch.ones_like(input)) * self.noise_scale.view((1,-1,1,1))
@@ -288,7 +295,7 @@ class ConvBlock(nn.Module):
             if ada_norm: # In PGGAN, activation came after PixelNorm. In StyleGAN, PixelNorm/AdaNorm comes after activation.
                 ada_conv2D = EqualConv2d # nn.Conv2d
 
-                print("AdaNorm layer count: {}".format(len(holder.adanorm_blocks)))
+                #print("AdaNorm layer count: {}".format(len(holder.adanorm_blocks)))
 
                 maybeBlur = BlurLayer() if blur else nn.Sequential()
 
@@ -338,18 +345,19 @@ class ConvBlock(nn.Module):
 gen_spectral_norm = False
 debug_ada = False
 class Generator(nn.Module):
-    def __init__(self, nz, n_label=10): #TODO remove code_dim arg (unused)
+    def __init__(self, nz, n_label=0, arch=None):
         super().__init__()
         self.nz = nz
-        self.tensor_properties = torch.ones(1).to(device=args.device) #hack
-        self.label_embed = nn.Embedding(n_label, n_label)
+        #self.tensor_properties = torch.ones(1).to(device=args.device) #hack
+        if n_label > 0:
+            self.label_embed = nn.Embedding(n_label, n_label)
+            self.label_embed.weight.data.normal_()
         self.code_norm = PixelNorm()
-        self.label_embed.weight.data.normal_()
 
         self.adanorm_blocks = nn.ModuleList()
-        self.z_const = torch.ones(512, 4, 4).to(device=args.device)
-        print("AdaNorm.z_const initialized")
-        HLM = 1 if args.small_darch else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
+        #self.z_const = torch.ones(512, 4, 4).to(device=args.device)
+
+        HLM = 1 if arch=='small' else 2 # High-resolution Layer multiplier: Use to make the 64x64+ resolution layers larger by this factor (1 = default Balanced Pioneer)
         progression_raw = [ConvBlock(nz, nz, 4, 3, 3, 1, spectral_norm=gen_spectral_norm, const_layer=True, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
                                           ConvBlock(nz, nz, 3, 1, spectral_norm=gen_spectral_norm, holder=self),
@@ -406,6 +414,8 @@ class Generator(nn.Module):
 
         mapping_lrmul = 0.01
 
+        self.use_layer_noise = (not args.no_LN and args.flip_invariance_layer <= -1)
+
         self.z_preprocess = nn.Sequential(
                     nn.Sequential(equal_lr(nn.Linear(nz, nz), gain=mapping_lrmul), nn.LeakyReLU(0.2)),
                     nn.Sequential(equal_lr(nn.Linear(nz, nz), gain=mapping_lrmul), nn.LeakyReLU(0.2)))
@@ -413,8 +423,17 @@ class Generator(nn.Module):
         init_linear(self.z_preprocess[0][0], lr_gain=mapping_lrmul)
         init_linear(self.z_preprocess[1][0], lr_gain=mapping_lrmul)
 
+    @property
+    def use_layer_noise(self):
+        return self.__use_layer_noise
+
+    @use_layer_noise.setter
+    def use_layer_noise(self, use_layer_noise):
+        self.__use_layer_noise = use_layer_noise
+
     def create(self):
-        print("::create() n/i")
+        pass
+        #print("::create() n/i")
 
    # Use alt_mix_z for style mixing so that for z of [B x N] and alt_mix_z of [M x N] and N <= B, the first M entreies of z are (partially) mixed with alt_mix_z
     # Since we assume the input in this case is already fully randomized, we don't need to randomize *which* z entires are mixed. But we do need to randomize the layer ID at which
@@ -432,8 +451,6 @@ class Generator(nn.Module):
             return content_input
 
         assert(not input is None)
-
-        self.use_layer_noise = not args.no_LN and args.flip_invariance_layer <= -1
 
         # Label is reserved for future use. Make None if not in use. #label = self.label_embed(label)
         if not label is None:
@@ -455,7 +472,7 @@ class Generator(nn.Module):
         
         # The first conv call will start from a constant content_input defined as a class-level var in AdaNorm
         if content_input is None:
-            out = torch.ones(512, 4, 4).to(device=args.device).repeat(batchN, 1, 1, 1)
+            out = torch.ones(512, 4, 4).to(device=input.device).repeat(batchN, 1, 1, 1)
         else:
             out = content_input
 
@@ -565,7 +582,7 @@ class Discriminator(nn.Module):
         if self.binary_predictor:
             self.linear = nn.Linear(nz, 1 + n_label)
     c = 0
-    def forward(self, input, step, alpha, use_ALQ):
+    def forward(self, input, step, alpha, unused_arg=False):
         for i in range(step, -1, -1):
             index = self.n_layer - i - 1
 
@@ -586,6 +603,7 @@ class Discriminator(nn.Module):
                     skip_rgb = F.avg_pool2d(input, 2)
                     skip_rgb = self.from_rgb[index + 1](skip_rgb)
                     out = (1 - alpha) * skip_rgb + alpha * out
+        
         z_out = out.squeeze(2).squeeze(2)
 
         if self.binary_predictor:

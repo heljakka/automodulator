@@ -8,6 +8,7 @@ from torch.autograd import Variable, grad
 from torchvision import utils
 
 from pioneer.model import Generator, Discriminator, SpectralNormConv2d, AdaNorm
+from pioneer.session import Session, accumulate
 
 from datetime import datetime
 import random
@@ -32,226 +33,6 @@ from pioneer.robust_loss_pytorch.adaptive import AdaptiveLossFunction
 args   = config.get_config()
 writer = None
 
-def batch_size(reso):
-    if args.gpu_count == 1:
-        save_memory = False
-        if not save_memory:
-            batch_table = {4:128, 8:128, 16:128, 32:64, 64:32, 128:32, 256:16, 512:4, 1024:1}
-        else:
-            batch_table = {4:64, 8:32, 16:32, 32:32, 64:16, 128:14, 256:2, 512:2, 1024:1}
-    elif args.gpu_count == 2:
-        batch_table = {4:256, 8:256, 16:256, 32:128, 64:64, 128:28, 256:32, 512:14, 1024:2}
-    elif args.gpu_count == 4:
-        batch_table = {4:512, 8:256, 16:128, 32:64, 64:32, 128:64, 256:64, 512:32, 1024:4}
-    elif args.gpu_count == 8:
-        batch_table = {4:512, 8:512, 16:512, 32:256, 64:256, 128:128, 256:64, 512:32, 1024:8}
-    else:
-        assert(False)
-    
-    return batch_table[reso]
-
-def loadSNU(path):
-    if os.path.exists(path):
-        us_list = torch.load(path)
-        for layer_i, layer in enumerate(SpectralNormConv2d.spectral_norm_layers):
-            setattr(layer, 'weight_u', us_list[layer_i])
-    else:
-        print("Warning! No SNU found.")
-
-def saveSNU(path):
-    us = []
-    for layer in SpectralNormConv2d.spectral_norm_layers:
-        us += [getattr(layer, 'weight_u')]
-    torch.save(us, path)
-
-class Session:
-    def __init__(self):
-        # Note: 4 requirements for sampling from pre-existing models:
-        # 1) Ensure you save and load both multi-gpu versions (DataParallel) or both not.
-        # 2) Ensure you set the same phase value as the pre-existing model and that your local and global alpha=1.0 are set
-        # 3) Sample from the g_running, not from the latest generator
-        # 4) You may need to warm up the g_running by running evaluate.reconstruction_dryrun() first
-
-        self.alpha = -1
-        self.sample_i = min(args.start_iteration, 0)
-        self.phase = args.start_phase
-
-        self.generator = nn.DataParallel( Generator(args.nz+1, args.n_label).to(device=args.device) )
-        self.g_running = nn.DataParallel( Generator(args.nz+1, args.n_label).to(device=args.device) )
-        self.encoder   = nn.DataParallel( Discriminator(nz = args.nz+1, n_label = args.n_label, binary_predictor = False).to(device=args.device) )
-
-        print("Using ", torch.cuda.device_count(), " GPUs!")
-
-        self.adaptive_loss_N = 9
-
-        self.reset_opt()
-
-        print('Session created.')
-
-    def reset_opt(self):
-        self.adaptive_loss = []
-        adaptive_loss_params = []
-        if args.match_x_metric == 'robust':
-            for j in range(self.adaptive_loss_N): #Assume 9 phases: 4,8,16,32,64,128,256, 512, 1024 ... ²
-                loss_j = (AdaptiveLossFunction(num_dims = 3*2**(4+2*j), float_dtype=np.float32, 
-                #device='cuda:0'))
-                device=args.device))
-                self.adaptive_loss.append(loss_j)
-                adaptive_loss_params += list(loss_j.parameters())
-
-        self.optimizerG = optim.Adam(self.generator.parameters(), args.lr, betas=(0.0, 0.99))
-        self.optimizerD = optim.Adam(list(self.encoder.parameters()) + adaptive_loss_params, args.lr, betas=(0.0, 0.99)) # includes all the encoder parameters...
-        
-        _adaparams = np.array([list(b.mod.parameters()) for b in self.generator.module.adanorm_blocks]).flatten() #list(AdaNorm.adanorm_blocks[0].mod.parameters())
-
-        self.optimizerA = optim.Adam(_adaparams, args.lr, betas=(0.0, 0.99))
-
-    def save_all(self, path):
-        save_dict = {'G_state_dict': self.generator.state_dict(),
-                    'D_state_dict': self.encoder.state_dict(),
-                    'G_running_state_dict': self.g_running.state_dict(),
-                    'optimizerD': self.optimizerD.state_dict(),
-                    'optimizerG': self.optimizerG.state_dict(),
-                    'optimizerA': self.optimizerA.state_dict(),
-                    'iteration': self.sample_i,
-                    'phase': self.phase,
-                    'alpha': self.alpha}
-        for i,loss_param in enumerate(self.adaptive_loss):
-            save_dict['adaptive_loss_{}'.format(i)] = loss_param.state_dict(),
-        torch.save(save_dict, path)
-        print("Adaptive Losses saved.")
-
-    def load(self, path):
-        checkpoint = torch.load(path)
-        self.sample_i = int(checkpoint['iteration'])
-
-        importOldGen = args.import_old_gen_format
-        if importOldGen:
-            for gen in ['G_state_dict', 'G_running_state_dict']:
-                for attr in ['weight', 'bias']:
-                    checkpoint[gen]['module.adanorm_blocks.0.mod.{}'.format(attr)] = checkpoint[gen]['module.progression.0.conv.3.mod.{}'.format(attr)]
-                    for i in range(0,9):
-                        print('module.adanorm_blocks.{}.mod.{}'.format(1+i*2, attr))
-                        print("=>")
-                        print('module.progression.{}.conv.0.2.mod.{}'.format(i+1,attr))
-                        print('module.adanorm_blocks.{}.mod.{}'.format(2+i*2, attr))
-                        print("=>")
-                        print('module.progression.{}.conv.3.mod.{}'.format(i+1,attr))
-                        if 'module.progression.{}.conv.0.2.mod.{}'.format(i+1,attr) in checkpoint[gen]:
-                            checkpoint[gen]['module.adanorm_blocks.{}.mod.{}'.format(1+i*2, attr)] = checkpoint[gen]['module.progression.{}.conv.0.2.mod.{}'.format(i+1,attr)]
-                            checkpoint[gen]['module.adanorm_blocks.{}.mod.{}'.format(2+i*2, attr)] = checkpoint[gen]['module.progression.{}.conv.3.mod.{}'.format(i+1,attr)]
-
-
-        loadGeneratorWithNoise = True
-        if loadGeneratorWithNoise:
-            self.generator.module.create()
-            self.g_running.module.create()
-            print("Generator dynamic components loaded via create().")
-
-        self.generator.load_state_dict(checkpoint['G_state_dict'])
-        self.g_running.load_state_dict(checkpoint['G_running_state_dict'])
-        self.encoder.load_state_dict(checkpoint['D_state_dict'])
-
-        if not loadGeneratorWithNoise:
-            self.generator.module.create()
-            self.g_running.module.create()
-        print("Generator dynamic components loaded via create().")
-
-        if args.reset_optimizers <= 0:
-            self.optimizerD.load_state_dict(checkpoint['optimizerD'])
-            self.optimizerG.load_state_dict(checkpoint['optimizerG'])
-            opts = [self.optimizerD, self.optimizerG]
-            try:
-                self.optimizerA.load_state_dict(checkpoint['optimizerA'])
-                opts += [self.optimizerA] 
-            except:
-                print('Optimizer for AdaNorm not loaded from state.')
-            for opt in opts:
-                for param_group in opt.param_groups:
-                    if param_group['lr'] != args.lr:
-                        print("LR in optimizer update: {} => {}".format(param_group['lr'], args.lr))
-                        param_group['lr'] = args.lr
-
-            print("Reloaded old optimizers")
-        else:
-            print("Despite loading the state, we reset the optimizers.")
-
-        self.alpha = checkpoint['alpha']
-        self.phase = int(checkpoint['phase'])
-        if args.start_phase > 0: #If the start phase has been manually set, try to actually use it (e.g. when have trained 64x64 for extra rounds and then turning the model over to 128x128)
-            self.phase = min(args.start_phase, self.phase)
-            print("Use start phase: {}".format(self.phase))
-        if self.phase > args.max_phase:
-            print('Warning! Loaded model claimed phase {} but max_phase={}'.format(self.phase, args.max_phase))
-            self.phase = args.max_phase
-        akeys_ok = True
-
-        for i in range(self.adaptive_loss_N):
-            akey = 'adaptive_loss_{}'.format(i)
-            if akey in checkpoint:
-                self.adaptive_loss[i].load_state_dict(checkpoint[akey][0])
-            else:
-                akeys_ok = False
-
-        if akeys_ok:
-            print("Adaptive Losses loaded.")
-        else:
-            print('WARNING! Adaptive Loss parameters were not found in checkpoint. Loss calculations will resume without historical information.')
-
-    def create(self):
-        if args.start_iteration <= 0:
-            args.start_iteration = 1
-            if args.no_progression:
-                self.sample_i = args.start_iteration = int( (args.max_phase + 0.5) * args.images_per_stage ) # Start after the fade-in stage of the last iteration
-                args.force_alpha = 1.0
-                print("Progressive growth disabled. Setting start step = {} and alpha = {}".format(args.start_iteration, args.force_alpha))
-        else:
-            reload_from = '{}/checkpoint/{}_state'.format(args.save_dir, str(args.start_iteration).zfill(6)) #e.g. '604000' #'600000' #latest'   
-            reload_from_SNU = '{}/checkpoint/{}_SNU'.format(args.save_dir, str(args.start_iteration).zfill(6))
-            print(reload_from)
-            if os.path.exists(reload_from):
-                self.load(reload_from)
-                print("Loaded {}".format(reload_from))
-                print("Iteration asked {} and got {}".format(args.start_iteration, self.sample_i))               
-                if args.load_SNU:
-                    loadSNU(reload_from_SNU)
-
-                if args.testonly:
-                    self.generator = copy.deepcopy(self.g_running)
-            else:
-                assert(not args.testonly)
-                self.sample_i = args.start_iteration
-                print('Start from iteration {}'.format(self.sample_i))
-
-        self.g_running.train(False)
-
-        if args.force_alpha >= 0.0:
-            self.alpha = args.force_alpha
-
-        if not args.testonly:
-            accumulate(self.g_running, self.generator, 0)
-
-    def prepareAdaptiveLossForNewPhase(self):
-        if args.match_x_metric != 'robust':
-            return
-        assert(self.phase>0)
-        with torch.no_grad():
-            if self.alpha <= 0.02: #Only run the preparatino if this phase has not already been training. In some resum-from-checkpoint scenarios, there might otherwise be misplaced initialization.
-                for offset in range(4): #Since the resolution doubles for the next phase, there are 4 new params to stand for each old param. The arrays are flattened, so every 4 slots on the new array correspond to 1 in the old. We copy them over.
-                    self.adaptive_loss[self.getResoPhase()].latent_scale[0][offset::4] = self.adaptive_loss[self.getResoPhase()-1].latent_scale[0]
-                    self.adaptive_loss[self.getResoPhase()].latent_alpha[0][offset::4] = self.adaptive_loss[self.getResoPhase()-1].latent_alpha[0]
-                print('Adaptive loss values have been copied over from phase {} to phase {}'.format(self.phase-1, self.phase))
-
-    def getResoPhase(self):
-        gen_offset = sum(1  for j in Generator.supportBlockPoints if j <= self.phase) #TODO: Replace Generator with self.generator once the g_running is handled properly as well.
-        return self.phase - gen_offset
-
-    def getReso(self):
-        return 4 * 2 ** self.getResoPhase()
-
-    def getBatchSize(self):
-        return batch_size(self.getReso())
-
 def setup():
     config.init()
     
@@ -271,13 +52,6 @@ def setup():
     random.seed(args.manual_seed)
     torch.manual_seed(args.manual_seed)
     torch.cuda.manual_seed_all(args.manual_seed)   
-
-def accumulate(model1, model2, decay=0.999):
-    par1 = dict(model1.named_parameters())
-    par2 = dict(model2.named_parameters())
-
-    for k in par1.keys():
-        par1[k].data.mul_(decay).add_(1 - decay, par2[k].data)
 
 class KLN01Loss(torch.nn.Module): #Adapted from https://github.com/DmitryUlyanov/AGE
 
@@ -628,7 +402,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             session.prepareAdaptiveLossForNewPhase()
             refresh_adaptiveLoss = False
         if refresh_dataset:
-            train_dataset = data.Utils.sample_data2(train_data_loader, batch_size(reso), reso, session)
+            train_dataset = data.Utils.sample_data2(train_data_loader, session.getBatchSize(), reso, session)
             refresh_dataset = False
             print("Refreshed dataset. Alpha={} and iteration={}".format(session.alpha, sample_i_current_stage))
         if refresh_imagePool:
@@ -645,13 +419,13 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         try:
             real_image, _ = next(train_dataset)              
         except (OSError, StopIteration):
-            train_dataset = data.Utils.sample_data2(train_data_loader, batch_size(reso), reso, session)
+            train_dataset = data.Utils.sample_data2(train_data_loader, session.getBatchSize(), reso, session)
             real_image, _ = next(train_dataset)
 
         ####################### DISCRIMINATOR / ENCODER ###########################
 
         utils.switch_grad_updates_to_first_of(encoder, generator)
-        kls = encoder_train(session, real_image, generatedImagePool, batch_size(reso), match_x, stats, "", margin = sched.m)
+        kls = encoder_train(session, real_image, generatedImagePool, session.getBatchSize(), match_x, stats, "", margin = sched.m)
 
         ######################## GENERATOR / DECODER #############################
 
@@ -659,7 +433,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             utils.switch_grad_updates_to_first_of(generator, encoder)
             
             for _ in range(args.n_generator):               
-                kls = decoder_train(session, batch_size(reso), stats, kls, real_image.data)
+                kls = decoder_train(session, session.getBatchSize(), stats, kls, real_image.data)
 
             accumulate(g_running, generator)
 
@@ -684,8 +458,8 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             ('{0}; it: {1}; phase: {2}; b: {3:.1f}; Alpha: {4:.3f}; Reso: {5}; E: {6:.2f}; KL(Phi(x)/Phi(G0)/Phi(G1)/Phi(G2)): {7}; z-reco: {8:.2f}; x-reco {9:.3f}; real_var {10:.6f}; fake_var {11:.6f}; z-mix: {12:.4f};').format(batch_count+1, session.sample_i+1, session.phase, b, session.alpha, reso, e, kls, zr, xr, stats['real_var'], stats['fake_var'], float(stats['z_mix_reconstruction_error']))
             )
 
-        pbar.update(batch_size(reso))
-        session.sample_i += batch_size(reso) # if not benchmarking else 100
+        pbar.update(b)
+        session.sample_i += b # if not benchmarking else 100
         batch_count += 1
 
         ########################  Saving ######################## 
@@ -693,7 +467,6 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         if batch_count % args.checkpoint_cycle == 0 or session.sample_i >= total_steps:
             for postfix in {str(session.sample_i).zfill(6)}: # 'latest'
                 session.save_all('{}/{}_state'.format(args.checkpoint_dir, postfix))
-                saveSNU('{}/{}_SNU'.format(args.checkpoint_dir, postfix))
 
             print("Checkpointed to {}".format(session.sample_i))
 
@@ -756,11 +529,34 @@ def makeTS(opts, session):
 
     return ts
 
-
 def main():
     setup()
-    session = Session()
-    session.create()
+
+    if args.save_dir is None:
+        session = torch.hub.load(args.hub, args.hub_model, pretrained=True, source='github')
+        # Even when the model is Hub-loaded, we need to save any results and updated checkpoints here:
+        args.save_dir = args.hub_model
+    else:
+        #Here, we load pretrained model after construction.
+        session = Session(False,
+                        args.start_iteration,
+                        args.nz+1,
+                        args.n_label,
+                        args.start_phase,
+                        args.max_phase,
+                        args.match_x_metric,
+                        args.lr,
+                        args.reset_optimizers,
+                        args.no_progression,
+                        args.images_per_stage,
+                        args.device,
+                        arch = 'small' if args.small_darch else None)
+        session.create(args.save_dir, args.force_alpha)
+
+    if args.testonly:
+        session.eval(useLN = not args.no_LN)
+    else:
+        session.train()
 
     print('PyTorch {}'.format(torch.__version__))
 

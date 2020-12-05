@@ -10,28 +10,62 @@ Code for the paper:
 
 Implementation by **Ari Heljakka** (code adapted from [2-5], metrics from [6-7], h5tool from [8]).
 
-## Pre-requisites
-
-Tested with:
-* Ubuntu 16.04
-* Python v3.7
-* CUDA v10.2
-* PyTorch v1.2.0
-
 ## Quick start
 
-1. Download the FFHQ pre-trained models.
-2. Try the Evaluation Jupyter Notebook at `/src/pioneer/Automodulator%20Evaluator.ipynb`
+### a) Locally
+
+We recommend to try out the models via PyTorch Hub, loading the pre-trained models automatically, with PyTorch v1.7+ and Python v3.6+ as the only dependencies.
+
+For a quick test, just run:
+```
+python eval_example.py
+```
+The script `eval_test.py` is self-explanatory and lets you immediately start style-mixing, generating random samples, and reconstructing. For style-mixing and reconstruction, the FFHQ models are far superior to the others.
+
+Alternatively, you can try the Jupyter Notebook at `/src/pioneer/Automodulator%20Evaluator.ipynb`
+
+### b) In Browser, via Colab
+
+You can run the [[Colab notebook]](https://colab.research.google.com/drive/1o1KQofPGdXSD-Zzxs32oHBuW_DeIPnnN) directly from browser.
+
+### c) In code
+
+To style-mix images you have loaded, all you have to do is basically the following:
+
+```
+model = torch.hub.load('heljakka/automodulator', 'ffhq512', pretrained=True, source='github')
+model.eval(useLN=False)
+z = model.encode(images)
+fused_image = model.decode(
+    model.zbuilder().hi(z[0])
+                    .mid(z[1])
+                    .lo(z[1]))
+```
+To select exact decoder layers to modulate, switch to the .use() API, replacing the final line with, for example:
+```
+fused_image = model.decode(
+    model.zbuilder().use(z[0], [0,3])
+                    .use(z[1], [3,5])
+                    .use(z[2], [5,-1]))
+```
+For scale-specific conditional sampling, where you fix e.g. only the coarse scales, all you nead to do is to leave those other scales undefined:
+```
+coarse_scale_conditioned_images = model.decode(
+    model.zbuilder(16).hi(z[0]))
+```
+For all-scales random sampling, simply run
+```
+random_images = model.generate(16)
+```
 
 ## Pre-trained models
 
-[Pre-trained models](https://drive.google.com/drive/folders/1SJuIINgq8j2Rr-DTi_WKg-FRvoVLrt5_) are available for each dataset.
-You can run them on command line with the [usage](#usage) examples below, inserting the proper dataset name (e.g. `-d celebaHQ`), checkpoint path name (e.g. `--save_dir cahq1`) and checkpoint ID, or use `-1` for the latest (e.g. `--start_iteration=36200000`).
-
-
-## Datasets
+[Pre-trained models](https://zenodo.org/record/4298894) in Zenodo are available for each dataset, either via Hub API or direct download.
+You can run them on command line with the [usage](#usage) examples below.
 
 If you only use the pre-trained models, you do not need any datasets except for reproducing the exact reconstruction results shown on the paper.
+
+## Datasets
 
 Supported datasets are:
 - FFHQ
@@ -52,6 +86,12 @@ Supported datasets are:
 Regular CelebA will likely also work but it has no scheduler setup (see [Training](#training)) but you can try to replicate the CelebA-HQ scheduler. For CelebA, please choose the aligned & cropped version; also, you still need to do the train/test split into separate directories manually.
 
 ## Dependencies
+
+For reproducing the paper results, you need the full dependencies. For the paper, the models were evaluated with
+* CUDA v10.2
+* PyTorch v1.2.0
+
+For all up-to-date dependencies, run
 ```
 pip install -r requirements.txt
 ```
@@ -67,25 +107,22 @@ For all command-line arguments, run
 python train.py -h
 ```
 
-You can evaluate a trained model by giving its directory as `save_dir`. The checkpoints are saved under `[save_dir]/checkpoint`.
-All examples show a sample checkpoint step count in the `--start_iteration` argument.
+You can evaluate a trained model by it's Hub model name in `--hub_model` as `ffhq512|ffhq256|celebahq256|lsuncars256|lsunbedrooms256` or by giving its directory as `save_dir`. The checkpoints are saved under `[save_dir]/checkpoint`.
 
-Use `--testonly` to designate the testing (evaluation) mode, as opposed to training.
-
-Note that each checkpoint has 2 files: the N_state and the N_SNU. Both are needed.
+Use `--testonly` to designate the testing (evaluation) mode, as opposed to training. The examples below use the Hub.
 
 1. Reconstructions, random samples and interpolations (FFHQ, 256x256 or 512x512):
 ```
-python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --train_path /data/FFHQ_train --test_path /data/FFHQ_test --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --start_iteration=-1 --testonly
+python -m pioneer.train -d ffhq --hub_model=ffhq512 --train_path /data/FFHQ_train --test_path /data/FFHQ_test --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --testonly
 ```
 
 2. Reconstructions of your own input images (FFHQ, 256x256 or 512x512 - use the 512x512 model file unless your input resolution is lower):
 (Please remember to put your images under an extra subdirectory (e.g. `/my_images/png/` for the below example. Face images must be cropped and aligned as in CelebA-HQ and FFHQ, respectively.)
 ```
-python -m pioneer.train -d ffhq --save_dir FFHQ_quicktest --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --start_iteration=-1 --testonly --aux_inpath /my_images
+python -m pioneer.train -d ffhq --hub_model=ffhq512 --sample_N=16 --reconstructions_N=8 --interpolate_N=3 --testonly --aux_inpath /my_images
 ```
 
-For style-mixing examples, please see the Evaluator Jupyter Notebook.
+For style-mixing examples, please see the `eval_test.py`.
 For not applying the layer noise, add `--no_LN`. (Also possible for models originally trained with layer noise.)
 For training or evaluating the CelebaHQ model, add `--small_darch` to indicate the smaller decoder architecture.
 
@@ -97,7 +134,7 @@ Pre-configured schedule exists for CelebA-HQ, FFHQ, LSUN Bedrooms and LSUN Cars.
 
 The batch sizes have been selected to enable running on 12 GB of GPU memory. 1-GPU setup has been confirmed to work in all cases up to 9.6M steps, and 2-GPU setup on all other resolutions. Please ensure enough disk space for checkpoints.
 
-To resume training from a checkpoint, it is sufficient to add `--start_iteration=N` where N is the step number of your latest state file (eg. for `checkpoint/256000_state`, N=256000). Use `start_iteration=-1` to take the latest state. For each checkpoint, the `N_SNU` file contains the U matrices of the spectral normalization layers. If the file is not there, the U matrix is restored, but this is not guaranteed to always work.
+To resume training from a checkpoint, it is sufficient to add `--start_iteration=N` where N is the step number of your latest state file (eg. for `checkpoint/256000_state`, N=256000). Use `start_iteration=-1` to take the latest state.
 
 The resolutions of each phase are defined in powers of 2, as follows:
 0 = 4x4,
@@ -132,19 +169,19 @@ You can reproduce the samples for the table as follows.
 
 FFHQ, 256x256:
 ```
-python -m pioneer.train -d ffhq --save_dir ffhq256 --sample_N=50100  --start_iteration=-1 --testonly
+python -m pioneer.train -d ffhq --hub_model=ffhq256 --sample_N=50100 --testonly
 ```
 CelebaHQ, 256x256:
 ```
-python -m pioneer.train -d celebaHQ --save_dir celebaHQ256 --small_darch --sample_N=50100  --start_iteration=-1 --testonly
+python -m pioneer.train -d celebaHQ --hub_model=celebahq256 --small_darch --sample_N=50100  --testonly
 ```
 LSUN Bedrooms, 256x256:
 ```
-python -m pioneer.train -d lsun --save_dir lsunBedrooms256 --sample_N=50100  --start_iteration=-1 --testonly
+python -m pioneer.train -d lsun --hub_model=lsunbedrooms256 --sample_N=50100  --testonly
 ```
 LSUN Cars, 256x256:
 ```
-python -m pioneer.train -d lsun --save_dir lsunCars256 --sample_N=50100  --start_iteration=-1 --testonly
+python -m pioneer.train -d lsun --hub_model=lsuncars256 --sample_N=50100   --testonly
 ```
 
 ## Support
