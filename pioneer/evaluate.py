@@ -171,9 +171,10 @@ class Utils:
                     #if writer:
                     #    writer.add_image('samples_latest_{}'.format(session.phase), torch.cat(images, 0), session.phase)
                 else:
+                    print("Generating samples at {}...".format(special_dir))
                     for ii, img in enumerate(images):
                         ipath =  '{}/{}_{}.png'.format(special_dir, str(global_i + 1).zfill(6), ii+outer_count*128)
-                        print(ipath)
+                        #print(ipath)
                         torchvision.utils.save_image(
                             img,
                             ipath,
