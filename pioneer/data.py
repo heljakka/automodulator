@@ -176,7 +176,7 @@ class Utils:
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
-        celebaMaxReso = 128 if args.data == 'celeba' else 256
+        celebaMaxReso = 128 if args.data == 'celeba' else 512 # 256->512 fixed after v1.0
 
         if args.data == 'celeba' or args.data == 'celebaHQ' or args.data == 'ffhq':
             transform_with_resize_norm = transforms.Compose([
