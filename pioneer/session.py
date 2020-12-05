@@ -267,7 +267,7 @@ class Session:
 
     # Evaluation Helpers
 
-    def reconstruct(session, imgs):
+    def reconstruct(self, imgs):
         with torch.no_grad():
             return self.decode( self.encode(imgs) )
 
