@@ -295,7 +295,7 @@ class ConvBlock(nn.Module):
             if ada_norm: # In PGGAN, activation came after PixelNorm. In StyleGAN, PixelNorm/AdaNorm comes after activation.
                 ada_conv2D = EqualConv2d # nn.Conv2d
 
-                print("AdaNorm layer count: {}".format(len(holder.adanorm_blocks)))
+                #print("AdaNorm layer count: {}".format(len(holder.adanorm_blocks)))
 
                 maybeBlur = BlurLayer() if blur else nn.Sequential()
 
@@ -432,7 +432,8 @@ class Generator(nn.Module):
         self.__use_layer_noise = use_layer_noise
 
     def create(self):
-        print("::create() n/i")
+        pass
+        #print("::create() n/i")
 
    # Use alt_mix_z for style mixing so that for z of [B x N] and alt_mix_z of [M x N] and N <= B, the first M entreies of z are (partially) mixed with alt_mix_z
     # Since we assume the input in this case is already fully randomized, we don't need to randomize *which* z entires are mixed. But we do need to randomize the layer ID at which

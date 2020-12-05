@@ -146,7 +146,7 @@ class Session:
         if loadGeneratorWithNoise:
             self.generator.module.create()
             self.g_running.module.create()
-            print("Generator dynamic components loaded via create().")
+            #print("Generator dynamic components loaded via create().")
 
         self.generator.load_state_dict(checkpoint['G_state_dict'])
         self.g_running.load_state_dict(checkpoint['G_running_state_dict'])
@@ -155,7 +155,7 @@ class Session:
         if not loadGeneratorWithNoise:
             self.generator.module.create()
             self.g_running.module.create()
-        print("Generator dynamic components loaded via create().")
+        #print("Generator dynamic components loaded via create().")
 
         if self.reset_optimizers <= 0:
             self.optimizerD.load_state_dict(checkpoint['optimizerD'])
