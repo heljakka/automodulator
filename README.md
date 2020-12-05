@@ -14,11 +14,11 @@ Implementation by **Ari Heljakka** (drawing from [2-4], h5tool from [5]).
 
 ### a) Locally
 
-We recommend to try out the models via PyTorch Hub, loading the pre-trained models automatically. The only dependency is PyTorch v1.7+ with Python v3.6+.
+We recommend to try out the models via PyTorch Hub, loading the pre-trained models automatically, with PyTorch v1.7+ and Python v3.6+ as the only dependencies.
 
-For quick test, just run:
+For a quick test, just run:
 ```
-python eval_test.py
+python eval_example.py
 ```
 The script `eval_test.py` is self-explanatory and lets you immediately start style-mixing, generating random samples, and reconstructing. For style-mixing and reconstruction, the FFHQ models are far superior to the others.
 
@@ -26,7 +26,7 @@ Alternatively, you can try the Jupyter Notebook at `/src/pioneer/Automodulator%2
 
 ### b) In Browser, via Colab
 
-You can run the Colab notebook directly from browser at ADD_LINK.
+You can run the [[Colab notebook]](https://colab.research.google.com/drive/1o1KQofPGdXSD-Zzxs32oHBuW_DeIPnnN) directly from browser.
 
 ### c) In code
 
@@ -34,8 +34,8 @@ To style-mix images you have loaded, all you have to do is basically the followi
 
 ```
 model = torch.hub.load('heljakka/automodulator', 'ffhq512', pretrained=True, source='github')
-model.eval(useLN=False)   #(prevent training, ignore layer noise in evaluation)
-z = model.encode(images)   # For 3 ALIGNED input images, encode into z[0], z[1] and z[2]. Use model.tf() to pre-process images.
+model.eval(useLN=False)
+z = model.encode(images)
 fused_image = model.decode(
     model.zbuilder().hi(z[0])
                     .mid(z[1])
@@ -53,7 +53,7 @@ For scale-specific conditional sampling, where you fix e.g. only the coarse scal
 coarse_scale_conditioned_images = model.decode(
     model.zbuilder(16).hi(z[0]))
 ```
-For random sampling, simply
+For all-scales random sampling, simply run
 ```
 random_images = model.generate(16)
 ```
@@ -61,12 +61,11 @@ random_images = model.generate(16)
 ## Pre-trained models
 
 [Pre-trained models](https://zenodo.org/record/4298894) in Zenodo are available for each dataset, either via Hub API or direct download.
-You can run them on command line with the [usage](#usage) examples below, inserting the proper dataset name (e.g. `-d celebaHQ`), checkpoint path name (e.g. `--save_dir cahq1`) and checkpoint ID, or use `-1` for the latest (e.g. `--start_iteration=36200000`).
-
-
-## Datasets
+You can run them on command line with the [usage](#usage) examples below.
 
 If you only use the pre-trained models, you do not need any datasets except for reproducing the exact reconstruction results shown on the paper.
+
+## Datasets
 
 Supported datasets are:
 - FFHQ
