@@ -20,11 +20,12 @@ def split_labels_out_of_latent(z):
     return z[:, :args.nz], label          
 
 def make_dirs():
-    if not os.path.exists(args.save_dir):
-        os.makedirs(args.save_dir)
-    args.checkpoint_dir = args.save_dir + '/checkpoint'
-    if not os.path.exists(args.checkpoint_dir):
-        os.makedirs(args.checkpoint_dir)
+    if not args.save_dir is None:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        args.checkpoint_dir = args.save_dir + '/checkpoint'
+        if not os.path.exists(args.checkpoint_dir):
+            os.makedirs(args.checkpoint_dir)
     if args.use_TB:
         if not os.path.exists(args.summary_dir):
             os.makedirs(args.summary_dir)

@@ -532,8 +532,13 @@ def makeTS(opts, session):
 def main():
     setup()
 
-    #Here, we load pretrained model after construction.
-    session = Session(False, #pretrained=
+    if args.save_dir is None:
+        session = torch.hub.load(args.hub, args.hub_model, pretrained=True, source='github')
+        # Even when the model is Hub-loaded, we need to save any results and updated checkpoints here:
+        args.save_dir = args.hub_model
+    else:
+        #Here, we load pretrained model after construction.
+        session = Session(False,
                         args.start_iteration,
                         args.nz+1,
                         args.n_label,
@@ -546,8 +551,8 @@ def main():
                         args.images_per_stage,
                         args.device,
                         arch = 'small' if args.small_darch else None)
+        session.create(args.save_dir, args.force_alpha)
 
-    session.create(args.save_dir, args.force_alpha)
     if args.testonly:
         session.eval(useLN = not args.no_LN)
     else:
