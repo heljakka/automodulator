@@ -267,7 +267,7 @@ class Session:
 
     # Evaluation Helpers
 
-    def reconstruct(session, imgs):
+    def reconstruct(self, imgs):
         with torch.no_grad():
             return self.decode( self.encode(imgs) )
 
@@ -333,7 +333,7 @@ class ScaledBuilder():
         return self
     def mid(self, z):
         with torch.no_grad():
-            self._z_stack[:,2:4,:] = z
+            self._z_stack[:,2:5,:] = z
         return self
     def lo(self, z):
         with torch.no_grad():
