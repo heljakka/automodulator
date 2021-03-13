@@ -6,7 +6,7 @@
 <br/>
 
 Code for the paper:
-* Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321). NeurIPS 2020, to appear.
+* Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (2020). **Deep Automodulators**. In *Advances in Neural Information Processing Systems (NeurIPS)*. [[arXiv preprint]](https://arxiv.org/abs/1912.10321)
 
 Implementation by **Ari Heljakka** (code adapted from [2-5], metrics from [6-7], h5tool from [8]).
 
@@ -192,7 +192,7 @@ Support and email replies are not always guaranteed, but we will appreciate and 
 
 ## References
 
-[1] Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (submitted). **Deep Automodulators**. [[arXiv preprint]](https://arxiv.org/abs/1912.10321)
+[1] Heljakka, A., Hou, Y., Kannala, J., and Solin, A. (2020). **Deep Automodulators**. In *Advances in Neural Information Processing Systems (NeurIPS)*. [[arXiv preprint]](https://arxiv.org/abs/1912.10321)
 
 [2] https://github.com/AaltoVision/balanced-pioneer
 
