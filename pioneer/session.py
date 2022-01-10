@@ -114,7 +114,10 @@ class Session:
         self.optimizerG = optim.Adam(self.generator.parameters(), self.lr, betas=(0.0, 0.99))
         self.optimizerD = optim.Adam(list(self.encoder.parameters()) + adaptive_loss_params, self.lr, betas=(0.0, 0.99)) # includes all the encoder parameters...
         
-        _adaparams = np.array([list(b.mod.parameters()) for b in self.generator.module.adanorm_blocks]).flatten() #list(AdaNorm.adanorm_blocks[0].mod.parameters())
+        _adaparams = []
+        for b in self.generator.module.adanorm_blocks:
+            for p in b.mod.parameters():
+                _adaparams.append(p)
 
         self.optimizerA = optim.Adam(_adaparams, self.lr, betas=(0.0, 0.99))
 
