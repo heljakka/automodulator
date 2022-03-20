@@ -1,6 +1,6 @@
 tqdm==4.51.0
 python-dateutil==2.7.3
-numpy==1.19.2
+numpy==1.21.0
 h5py==2.8.0
 scipy==1.5.2
 ipython==7.16.3
