@@ -186,7 +186,7 @@ python -m pioneer.train -d lsun --hub_model=lsuncars256 --sample_N=50100   --tes
 
 ## Support
 
-For all correspondence, please contact ari.heljakka@aalto.fi.
+For all correspondence, please contact heljakka@iki.fi
 
 Support and email replies are not always guaranteed, but we will appreciate and evaluate all feedback.
 
